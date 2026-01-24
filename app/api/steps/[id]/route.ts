@@ -30,6 +30,42 @@ export async function PATCH(
             },
         });
 
+        // --- History Sync for Repetitive Tasks ---
+        if (step.isRepetitive && completed !== undefined) {
+            const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+            if (completed === true) {
+                // Record completion
+                // @ts-ignore: Client stale
+                const existing = await prisma.taskCompletion.findFirst({
+                    where: {
+                        stepId: id,
+                        date: todayStr
+                    }
+                });
+
+                if (!existing) {
+                    // @ts-ignore: Client stale
+                    await prisma.taskCompletion.create({
+                        data: {
+                            stepId: id,
+                            date: todayStr,
+                            completed: true
+                        }
+                    });
+                }
+            } else {
+                // Remove completion for today (Undo)
+                // @ts-ignore: Client stale
+                await prisma.taskCompletion.deleteMany({
+                    where: {
+                        stepId: id,
+                        date: todayStr
+                    }
+                });
+            }
+        }
+
         return NextResponse.json(step);
     } catch (error) {
         console.error('Error updating step:', error);

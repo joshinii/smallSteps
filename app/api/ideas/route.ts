@@ -7,6 +7,26 @@ export async function GET() {
         // Ensure Prisma client is connected
         await prisma.$connect();
 
+        // 1. Reset Recurring Tasks (Daily Reset)
+        // Find tasks that are Repetitive, Completed, and completed BEFORE today (00:00:00).
+        // Note: Using server time. Ideally utilize user timezone if available.
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        await prisma.step.updateMany({
+            where: {
+                // @ts-ignore: Property exists in schema but client not regenerated
+                isRepetitive: true,
+                completed: true,
+                completedAt: {
+                    lt: today // Before start of today
+                }
+            },
+            data: {
+                completed: false
+            }
+        });
+
         const ideas = await prisma.idea.findMany({
             include: {
                 steps: {

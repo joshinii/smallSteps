@@ -7,27 +7,58 @@ import { getLocalDate } from '@/lib/utils';
 import HabitManager from '@/components/Habits/HabitManager';
 
 export default function HabitsPage() {
-    const [currentMonth] = useState(getLocalDate().substring(0, 7)); // YYYY-MM
+    const [currentMonth, setCurrentMonth] = useState(getLocalDate().substring(0, 7)); // YYYY-MM
     const [showHabitManager, setShowHabitManager] = useState(false);
+
+    const changeMonth = (increment: number) => {
+        const [year, month] = currentMonth.split('-').map(Number);
+        const date = new Date(year, month - 1 + increment, 1);
+        const y = date.getFullYear();
+        const m = date.getMonth() + 1;
+        setCurrentMonth(`${y}-${m < 10 ? '0' + m : m}`);
+    };
+
+    const getMonthLabel = (isoMonth: string) => {
+        const [year, month] = isoMonth.split('-').map(Number);
+        const date = new Date(year, month - 1, 1);
+        return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    };
 
     return (
         <div className="w-full max-w-[95%] mx-auto px-4 py-8 animate-fadeIn">
-            <header className="mb-8 flex items-center justify-between">
-                <div>
-                    {/* Back link */}
-                    <Link href="/" className="mb-2 inline-block text-sm text-muted hover:text-accent transition-colors">
-                        ← Back to Goals
-                    </Link>
-                    <h1 className="text-3xl font-light text-foreground">
-                        Daily Habits
+            <header className="mb-8 flex flex-col md:flex-row items-center justify-between gap-4 relative">
+
+                {/* Centered Month Navigation */}
+                <div className="flex items-center gap-6">
+                    <button
+                        onClick={() => changeMonth(-1)}
+                        className="p-2 hover:bg-gray-100 rounded-full text-muted hover:text-foreground transition-colors"
+                        aria-label="Previous Month"
+                    >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+                    </button>
+
+                    <h1 className="text-2xl font-light text-foreground min-w-[200px] text-center select-none">
+                        {getMonthLabel(currentMonth)}
                     </h1>
+
+                    <button
+                        onClick={() => changeMonth(1)}
+                        className="p-2 hover:bg-gray-100 rounded-full text-muted hover:text-foreground transition-colors"
+                        aria-label="Next Month"
+                    >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+                    </button>
                 </div>
-                <button
-                    onClick={() => setShowHabitManager(true)}
-                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-foreground rounded-xl text-sm font-medium transition-colors"
-                >
-                    Manage Habits
-                </button>
+
+                <div className="md:absolute md:right-0">
+                    <button
+                        onClick={() => setShowHabitManager(true)}
+                        className="px-4 py-2 bg-white border border-border hover:border-accent hover:text-accent text-muted rounded-xl text-sm font-medium transition-colors shadow-sm"
+                    >
+                        Manage Habits
+                    </button>
+                </div>
             </header>
 
             <HabitMatrix month={currentMonth} />

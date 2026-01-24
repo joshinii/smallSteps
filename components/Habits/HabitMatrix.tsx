@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { getLocalDate } from '@/lib/utils';
 
 interface MatrixItem {
@@ -258,7 +258,7 @@ export default function HabitMatrix({ month }: HabitMatrixProps) {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                     {groups.map(group => (
-                        <>
+                        <Fragment key={group.id}>
                             {/* Group Header Row */}
                             <tr
                                 className="bg-gray-50/80 hover:bg-gray-100 transition-colors cursor-pointer group/header sticky left-0 z-10"
@@ -298,7 +298,7 @@ export default function HabitMatrix({ month }: HabitMatrixProps) {
                                     })}
                                 </tr>
                             ))}
-                        </>
+                        </Fragment>
                     ))}
                 </tbody>
             </table>
