@@ -1,0 +1,105 @@
+// SmallSteps Database Schema
+// Designed for minimal cognitive load and gentle task management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Idea {
+  id               String   @id @default(cuid())
+  content          String   // Original user input
+  clarifiedContent String?  // AI-clarified version
+  priority         String   @default("MEDIUM") // HIGH, MEDIUM, LOW
+  targetDate       DateTime? // Soft reminder date
+  status           String   @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  steps            Step[]
+}
+
+model Step {
+  id          String   @id @default(cuid())
+  ideaId      String
+  content     String   // The actual step description
+  type        String   // Category: exercise, nutrition, etc.
+  order       Int      // Position in sequence
+  completed   Boolean  @default(false)
+  isRepetitive Boolean @default(false)
+  priority    String   @default("SOON") // NOW, SOON, SOMEDAY (NEW)
+  targetDate  DateTime? // Gentle target date (NEW)
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  
+  idea         Idea            @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  reflection   Reflection?
+  completions  TaskCompletion[] // NEW: Track daily completions for repetitive tasks
+  
+  @@index([ideaId])
+}
+
+model Reflection {
+  id        String   @id @default(cuid())
+  stepId    String   @unique
+  feeling   String   // LIGHTER, NEUTRAL, HARD
+  note      String?  // Optional user note
+  createdAt DateTime @default(now())
+  
+  step      Step     @relation(fields: [stepId], references: [id], onDelete: Cascade)
+}
+
+// NEW: Track daily completions for repetitive tasks
+model TaskCompletion {
+  id        String   @id @default(cuid())
+  stepId    String
+  date      String   // YYYY-MM-DD format for daily tracking
+  completed Boolean  @default(true)
+  createdAt DateTime @default(now())
+  
+  step      Step     @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  
+  @@unique([stepId, date])
+  @@index([stepId])
+  @@index([date])
+}
+
+// HABIT TRACKER MODELS
+
+model Habit {
+  id          String   @id @default(cuid())
+  userId      String?  // Optional for now, assuming single user or local feedback
+  name        String
+  type        String   // "ENERGY_GIVING", "EFFORTFUL", "RESTORATIVE"
+  frequency   String   // "DAILY", "MOST_DAYS", "OCCASIONALLY"
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  logs        HabitLog[]
+}
+
+model DailyLog {
+  id        String   @id @default(cuid())
+  date      String   @unique // YYYY-MM-DD
+  moment    String?  // "One small moment worth noting"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HabitLog {
+  id        String   @id @default(cuid())
+  habitId   String
+  date      String   // YYYY-MM-DD
+  status    String   // "DONE", "NOT_DONE", "SKIPPED"
+  createdAt DateTime @default(now())
+  
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  
+  @@unique([habitId, date])
+  @@index([date])
+}
