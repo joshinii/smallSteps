@@ -18,8 +18,18 @@ export default function Sidebar({ isCollapsed, toggleSidebar, isMobile }: Sideba
 
     const navItems = [
         {
+            name: 'Today',
+            path: '/today',
+            icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+            )
+        },
+        {
             name: 'Goals',
-            path: '/',
+            path: '/goals',
             icon: (
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" />
@@ -29,7 +39,7 @@ export default function Sidebar({ isCollapsed, toggleSidebar, isMobile }: Sideba
             )
         },
         {
-            name: 'Daily Tasks',
+            name: 'Habits',
             path: '/habits',
             icon: (
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -44,18 +54,6 @@ export default function Sidebar({ isCollapsed, toggleSidebar, isMobile }: Sideba
             icon: (
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L14 7m0 13V7" />
-                </svg>
-            )
-        },
-        {
-            name: 'Design',
-            path: '/design',
-            icon: (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 19l7-7 3 3-7 7-3-3z" />
-                    <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-                    <path d="M2 2l7.586 7.586" />
-                    <circle cx="11" cy="11" r="2" />
                 </svg>
             )
         },

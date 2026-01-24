@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
+import { AIContextProvider } from '@/lib/ai/AIContext';
+import AISettingsModal from './AISettingsModal';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
@@ -30,17 +32,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <div className="flex min-h-screen">
-            {/* Sidebar with props */}
-            <Sidebar isCollapsed={isCollapsed} toggleSidebar={toggleSidebar} isMobile={isMobile} />
+        <AIContextProvider>
+            <div className="flex min-h-screen">
+                {/* Sidebar with props */}
+                <Sidebar isCollapsed={isCollapsed} toggleSidebar={toggleSidebar} isMobile={isMobile} />
 
-            {/* Main Content Area */}
-            <main
-                className={`flex-1 w-full transition-all duration-300 ease-in-out ${isMobile ? 'ml-0' : (isCollapsed ? 'ml-20' : 'ml-64')
-                    }`}
-            >
-                {children}
-            </main>
-        </div>
+                {/* Main Content Area */}
+                <main
+                    className={`flex-1 w-full transition-all duration-300 ease-in-out ${isMobile ? 'ml-0' : (isCollapsed ? 'ml-20' : 'ml-64')
+                        }`}
+                >
+                    {children}
+                </main>
+            </div>
+
+            {/* Global AI Settings Modal */}
+            <AISettingsModal />
+        </AIContextProvider>
     );
 }
+
