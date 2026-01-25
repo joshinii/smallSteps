@@ -3,8 +3,8 @@
 // SmallSteps AI Context
 // React context for managing AI provider state across the app
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { ProviderName, setApiKey, hasApiKey, clearApiKey, getProvider, PROVIDER_INFO } from '@/lib/ai';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import { ProviderName, setApiKey, hasApiKey, clearApiKey, getProvider, PROVIDER_INFO, loadPersistedKeys } from '@/lib/ai';
 import type { AIProvider } from '@/lib/ai/ai-provider';
 import { manualProvider } from '@/lib/ai/ai-provider';
 
@@ -26,6 +26,20 @@ export function AIContextProvider({ children }: { children: ReactNode }) {
     const [provider, setProviderState] = useState<ProviderName>('manual');
     const [isConfigured, setIsConfigured] = useState(false);
     const [showSetupModal, setShowSetupModal] = useState(false);
+
+    // Load persisted API keys on mount
+    useEffect(() => {
+        loadPersistedKeys();
+        // Check if any provider has a key after loading
+        const providers: ProviderName[] = ['claude', 'gemini', 'openai'];
+        for (const p of providers) {
+            if (hasApiKey(p)) {
+                setProviderState(p);
+                setIsConfigured(true);
+                break;
+            }
+        }
+    }, []);
 
     const setProvider = useCallback((name: ProviderName) => {
         setProviderState(name);

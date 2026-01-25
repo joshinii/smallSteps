@@ -1,64 +1,36 @@
 // SmallSteps Claude Adapter
-// Implements AIProvider interface using Anthropic's Claude API
+// Implements AIProvider interface using server-side API route
 
-import Anthropic from '@anthropic-ai/sdk';
 import type { AIProvider, GoalPlan, EffortEstimate, RecurringSuggestion } from './ai-provider';
-
-const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
-const DEFAULT_MAX_TOKENS = 2048;
-const DEFAULT_TEMPERATURE = 0.7;
 
 export class ClaudeAdapter implements AIProvider {
     readonly name = 'claude';
     readonly displayName = 'Claude (Anthropic)';
-    private client: Anthropic;
+    private apiKey: string;
 
     constructor(apiKey: string) {
-        this.client = new Anthropic({ apiKey });
+        this.apiKey = apiKey;
     }
 
-    async decomposeGoal(goalText: string, targetDate?: string): Promise<GoalPlan> {
-        const targetDateContext = targetDate
-            ? `\nTarget completion: ${new Date(targetDate).toLocaleDateString()}`
-            : '';
+    private async callAPI(action: string, payload: any): Promise<string> {
+        const response = await fetch('/api/ai/claude', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: this.apiKey, action, payload }),
+        });
 
-        const prompt = `You are a calm, thoughtful planner helping someone achieve their goal gently.
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'API call failed');
+        }
 
-Goal: "${goalText}"${targetDateContext}
+        const data = await response.json();
+        return data.result;
+    }
 
-Break this down into small, manageable tasks. For each task:
-1. Keep it specific but achievable
-2. Estimate time honestly (most tasks should be 10-30 minutes)  
-3. Mark daily habits as recurring
-4. Include a brief rationale for your approach
-
-**Guidelines:**
-- Think holistically about what's needed
-- Prefer small steps over overwhelming chunks
-- Create 4-8 tasks, not more
-- Be realistic about time estimates
-
-**Output Format (JSON only):**
-{
-  "rationale": "Brief, encouraging explanation",
-  "tasks": [
-    { "content": "Specific action", "category": "category", "estimatedMinutes": 15, "isRecurring": false },
-    { "content": "Daily habit", "category": "health", "estimatedMinutes": 10, "isRecurring": true }
-  ],
-  "suggestedTargetDate": "YYYY-MM-DD" // Optional, only if user didn't provide one
-}
-
-Return ONLY valid JSON.`;
-
+    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean): Promise<GoalPlan> {
         try {
-            const message = await this.client.messages.create({
-                model: DEFAULT_MODEL,
-                max_tokens: DEFAULT_MAX_TOKENS,
-                temperature: DEFAULT_TEMPERATURE,
-                messages: [{ role: 'user', content: prompt }],
-            });
-
-            const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
+            const text = await this.callAPI('decomposeGoal', { goalText, targetDate, userFeedback, isLifelong });
             const jsonText = this.extractJson(text);
             const parsed = JSON.parse(jsonText);
 
@@ -69,6 +41,7 @@ Return ONLY valid JSON.`;
                     category: t.category || 'action',
                     estimatedMinutes: t.estimatedMinutes || t.timeEstimate || 25,
                     isRecurring: t.isRecurring || false,
+                    frequency: t.frequency,
                 })),
                 suggestedTargetDate: parsed.suggestedTargetDate,
             };
@@ -79,26 +52,8 @@ Return ONLY valid JSON.`;
     }
 
     async estimateTaskEffort(taskContent: string): Promise<EffortEstimate> {
-        const prompt = `Estimate how long this task realistically takes for an average person:
-
-Task: "${taskContent}"
-
-Respond with JSON only:
-{
-  "estimatedMinutes": <number 5-120>,
-  "confidence": "low" | "medium" | "high",
-  "rationale": "brief explanation"
-}`;
-
         try {
-            const message = await this.client.messages.create({
-                model: DEFAULT_MODEL,
-                max_tokens: 256,
-                temperature: 0.3,
-                messages: [{ role: 'user', content: prompt }],
-            });
-
-            const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
+            const text = await this.callAPI('estimateTaskEffort', { taskContent });
             const parsed = JSON.parse(this.extractJson(text));
 
             return {
@@ -113,28 +68,8 @@ Respond with JSON only:
     }
 
     async identifyRecurringTasks(tasks: string[]): Promise<RecurringSuggestion[]> {
-        const prompt = `For each task below, determine if it should be a recurring daily habit or a one-time action.
-
-Tasks:
-${tasks.map((t, i) => `${i + 1}. ${t}`).join('\n')}
-
-Respond with JSON only:
-{
-  "suggestions": [
-    { "index": 0, "shouldBeRecurring": true, "frequency": "daily", "reason": "..." },
-    { "index": 1, "shouldBeRecurring": false }
-  ]
-}`;
-
         try {
-            const message = await this.client.messages.create({
-                model: DEFAULT_MODEL,
-                max_tokens: 512,
-                temperature: 0.3,
-                messages: [{ role: 'user', content: prompt }],
-            });
-
-            const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
+            const text = await this.callAPI('identifyRecurringTasks', { tasks });
             const parsed = JSON.parse(this.extractJson(text));
 
             return tasks.map((taskContent, i) => {

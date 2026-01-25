@@ -6,6 +6,7 @@ export interface TaskSuggestion {
     category?: string;
     estimatedMinutes: number;
     isRecurring: boolean;
+    frequency?: 'daily' | 'weekdays' | 'weekends' | 'weekly' | string;
 }
 
 export interface GoalPlan {
@@ -38,8 +39,9 @@ export interface AIProvider {
     /**
      * Decompose a goal into actionable tasks
      * Returns tasks with estimated effort (hidden from user)
+     * @param userFeedback - Optional feedback for AI regeneration (e.g., "Make tasks smaller")
      */
-    decomposeGoal(goalText: string, targetDate?: string): Promise<GoalPlan>;
+    decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean): Promise<GoalPlan>;
 
     /**
      * Estimate effort for a single task
@@ -60,7 +62,7 @@ export class ManualProvider implements AIProvider {
     readonly name = 'manual';
     readonly displayName = 'Continue Manually';
 
-    async decomposeGoal(goalText: string): Promise<GoalPlan> {
+    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean): Promise<GoalPlan> {
         return {
             rationale: 'Breaking this down into manageable steps.',
             tasks: [

@@ -1,62 +1,36 @@
 // SmallSteps OpenAI Adapter
-// Implements AIProvider interface using OpenAI's API
+// Implements AIProvider interface using server-side API route
 
-import OpenAI from 'openai';
 import type { AIProvider, GoalPlan, EffortEstimate, RecurringSuggestion } from './ai-provider';
-
-const DEFAULT_MODEL = 'gpt-4o';
 
 export class OpenAIAdapter implements AIProvider {
     readonly name = 'openai';
     readonly displayName = 'GPT-4 (OpenAI)';
-    private client: OpenAI;
+    private apiKey: string;
 
     constructor(apiKey: string) {
-        this.client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+        this.apiKey = apiKey;
     }
 
-    async decomposeGoal(goalText: string, targetDate?: string): Promise<GoalPlan> {
-        const targetDateContext = targetDate
-            ? `\nTarget completion: ${new Date(targetDate).toLocaleDateString()}`
-            : '';
+    private async callAPI(action: string, payload: any): Promise<string> {
+        const response = await fetch('/api/ai/openai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: this.apiKey, action, payload }),
+        });
 
-        const prompt = `You are a calm, thoughtful planner helping someone achieve their goal gently.
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'API call failed');
+        }
 
-Goal: "${goalText}"${targetDateContext}
+        const data = await response.json();
+        return data.result;
+    }
 
-Break this down into small, manageable tasks. For each task:
-1. Keep it specific but achievable
-2. Estimate time honestly (most tasks should be 10-30 minutes)  
-3. Mark daily habits as recurring
-4. Include a brief rationale for your approach
-
-**Guidelines:**
-- Think holistically about what's needed
-- Prefer small steps over overwhelming chunks
-- Create 4-8 tasks, not more
-- Be realistic about time estimates
-
-**Output Format (JSON only):**
-{
-  "rationale": "Brief, encouraging explanation",
-  "tasks": [
-    { "content": "Specific action", "category": "category", "estimatedMinutes": 15, "isRecurring": false },
-    { "content": "Daily habit", "category": "health", "estimatedMinutes": 10, "isRecurring": true }
-  ],
-  "suggestedTargetDate": "YYYY-MM-DD"
-}
-
-Return ONLY valid JSON.`;
-
+    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string): Promise<GoalPlan> {
         try {
-            const response = await this.client.chat.completions.create({
-                model: DEFAULT_MODEL,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.7,
-                max_tokens: 2048,
-            });
-
-            const text = response.choices[0]?.message?.content?.trim() || '';
+            const text = await this.callAPI('decomposeGoal', { goalText, targetDate, userFeedback });
             const jsonText = this.extractJson(text);
             const parsed = JSON.parse(jsonText);
 
@@ -77,26 +51,8 @@ Return ONLY valid JSON.`;
     }
 
     async estimateTaskEffort(taskContent: string): Promise<EffortEstimate> {
-        const prompt = `Estimate how long this task realistically takes for an average person:
-
-Task: "${taskContent}"
-
-Respond with JSON only:
-{
-  "estimatedMinutes": <number 5-120>,
-  "confidence": "low" | "medium" | "high",
-  "rationale": "brief explanation"
-}`;
-
         try {
-            const response = await this.client.chat.completions.create({
-                model: DEFAULT_MODEL,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.3,
-                max_tokens: 256,
-            });
-
-            const text = response.choices[0]?.message?.content?.trim() || '';
+            const text = await this.callAPI('estimateTaskEffort', { taskContent });
             const parsed = JSON.parse(this.extractJson(text));
 
             return {
@@ -111,28 +67,8 @@ Respond with JSON only:
     }
 
     async identifyRecurringTasks(tasks: string[]): Promise<RecurringSuggestion[]> {
-        const prompt = `For each task below, determine if it should be a recurring daily habit or a one-time action.
-
-Tasks:
-${tasks.map((t, i) => `${i + 1}. ${t}`).join('\n')}
-
-Respond with JSON only:
-{
-  "suggestions": [
-    { "index": 0, "shouldBeRecurring": true, "frequency": "daily", "reason": "..." },
-    { "index": 1, "shouldBeRecurring": false }
-  ]
-}`;
-
         try {
-            const response = await this.client.chat.completions.create({
-                model: DEFAULT_MODEL,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.3,
-                max_tokens: 512,
-            });
-
-            const text = response.choices[0]?.message?.content?.trim() || '';
+            const text = await this.callAPI('identifyRecurringTasks', { tasks });
             const parsed = JSON.parse(this.extractJson(text));
 
             return tasks.map((taskContent, i) => {

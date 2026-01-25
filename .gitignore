@@ -44,3 +44,7 @@ prisma/dev.db-journal
 *.sqlite3
 
 /generated/prisma
+ 
+# Agent
+.agent/
+.claude/

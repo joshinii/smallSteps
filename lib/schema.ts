@@ -11,7 +11,9 @@ export interface Goal {
     clarifiedContent?: string;
     targetDate?: string; // YYYY-MM-DD, optional
     estimatedTargetDate?: string; // AI-suggested if user doesn't provide
+    lifelong?: boolean; // true for ongoing goals (daily habits)
     status: 'active' | 'paused' | 'completed';
+    completedAt?: string; // When all tasks were completed
     createdAt: string;
     updatedAt: string;
 }
@@ -21,6 +23,7 @@ export interface Task {
     goalId: string;
     content: string;
     category?: string; // exercise, nutrition, learning, etc.
+    frequency?: 'daily' | 'weekdays' | 'weekends' | 'weekly' | string;
 
     // Time-based progress model (internal)
     estimatedTotalMinutes: number;
@@ -36,6 +39,9 @@ export interface Task {
     skipCount: number;
     lastSkippedAt?: string;
 
+    // Soft delete
+    archivedAt?: string;
+
     createdAt: string;
     updatedAt: string;
 }
@@ -44,6 +50,7 @@ export interface DailyAllocation {
     date: string; // YYYY-MM-DD
     taskIds: string[];
     estimatedLoad: number; // Total effort units for the day
+    dayType?: 'gentle' | 'balanced' | 'focused';
     completedAt?: string;
     createdAt: string;
 }
@@ -121,8 +128,31 @@ export function generateId(): string {
 // Date Utilities
 // ============================================
 
+/**
+ * Returns the current date in YYYY-MM-DD format based on local time.
+ */
 export function getLocalDateString(date: Date = new Date()): string {
-    return date.toISOString().split('T')[0];
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Alias for backwards compatibility.
+ * @deprecated Use getLocalDateString() instead
+ */
+export function getLocalDate(): string {
+    return getLocalDateString();
+}
+
+/**
+ * Parses a YYYY-MM-DD string into a Date object in local time (midnight).
+ * Solves the issue where new Date("YYYY-MM-DD") uses UTC.
+ */
+export function parseLocalDate(dateStr: string): Date {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
 }
 
 export function getISOTimestamp(): string {

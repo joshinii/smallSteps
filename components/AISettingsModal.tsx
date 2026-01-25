@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { useAI } from '@/lib/ai/AIContext';
-import { ProviderName, PROVIDER_INFO, hasApiKey } from '@/lib/ai';
+import { ProviderName, PROVIDER_INFO, hasApiKey, hasStorageConsent, setStorageConsent } from '@/lib/ai';
 
 export default function AISettingsModal() {
     const { showSetupModal, closeSetupModal, configureProvider, provider: currentProvider } = useAI();
@@ -14,6 +14,7 @@ export default function AISettingsModal() {
     );
     const [apiKey, setApiKey] = useState('');
     const [error, setError] = useState('');
+    const [rememberKey, setRememberKey] = useState(hasStorageConsent());
 
     if (!showSetupModal) return null;
 
@@ -25,6 +26,8 @@ export default function AISettingsModal() {
             setError('Please enter an API key');
             return;
         }
+        // Set storage consent before configuring
+        setStorageConsent(rememberKey);
         configureProvider(selectedProvider, apiKey.trim());
         setApiKey('');
         setError('');
@@ -111,6 +114,24 @@ export default function AISettingsModal() {
                         >
                             Get a {PROVIDER_INFO[selectedProvider].displayName} key →
                         </a>
+                    </div>
+
+                    {/* Remember Key Checkbox */}
+                    <div className="mb-6">
+                        <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={rememberKey}
+                                onChange={(e) => setRememberKey(e.target.checked)}
+                                className="w-4 h-4 mt-0.5 rounded border-gray-300 text-foreground focus:ring-offset-0 focus:ring-1 focus:ring-gray-400"
+                            />
+                            <div className="flex-1">
+                                <span className="block text-sm font-medium text-foreground">Remember API key</span>
+                                <span className="block text-xs text-muted mt-0.5">
+                                    Saves key securely on this device. You won't need to re-enter it.
+                                </span>
+                            </div>
+                        </label>
                     </div>
 
                     {/* Actions */}

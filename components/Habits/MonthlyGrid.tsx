@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { dailyMomentsDB, tasksDB, taskProgressDB } from '@/lib/db';
+import type { Task, TaskProgress } from '@/lib/schema';
+import { getLocalDateString } from '@/lib/schema';
 
 const STATE_ICONS = {
     DONE: '✓',
@@ -14,31 +17,54 @@ interface MonthlyGridProps {
 }
 
 export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
-    const [habits, setHabits] = useState<any[]>([]);
-    const [dailyLogs, setDailyLogs] = useState<any[]>([]);
-    const [habitLogs, setHabitLogs] = useState<any[]>([]);
+    const [habits, setHabits] = useState<Task[]>([]);
+    const [dailyMoments, setDailyMoments] = useState<Record<string, string>>({}); // date -> moment
+    const [habitLogs, setHabitLogs] = useState<Record<string, string>>({}); // "date-taskId" -> status
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         fetchData();
     }, [currentMonth]);
 
-
-
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [habitsRes, logsRes] = await Promise.all([
-                fetch('/api/habits'),
-                fetch(`/api/daily-logs?month=${currentMonth}`)
-            ]);
+            // 1. Fetch recurring tasks (Habits)
+            const recurring = await tasksDB.getRecurring();
+            setHabits(recurring);
 
-            const activeHabits = await habitsRes.json();
-            const logsData = await logsRes.json();
+            // 2. Fetch data for all days in month
+            const days = getDaysInMonth(currentMonth);
 
-            setHabits(activeHabits);
-            setDailyLogs(logsData.dailyLogs);
-            setHabitLogs(logsData.habitLogs);
+            const momentsMap: Record<string, string> = {};
+            const logsMap: Record<string, string> = {};
+
+            // Fetch in parallel
+            const promises = days.map(async (date) => {
+                const [momentEntry, progressEntries] = await Promise.all([
+                    dailyMomentsDB.getByDate(date),
+                    taskProgressDB.getByDate(date)
+                ]);
+
+                if (momentEntry) {
+                    momentsMap[date] = momentEntry.moment;
+                }
+
+                if (progressEntries) {
+                    progressEntries.forEach(p => {
+                        // If minutes > 0 -> DONE
+                        if (p.minutesWorked > 0) {
+                            logsMap[`${date}-${p.taskId}`] = 'DONE';
+                        }
+                    });
+                }
+            });
+
+            await Promise.all(promises);
+
+            setDailyMoments(momentsMap);
+            setHabitLogs(logsMap);
+
         } catch (e) {
             console.error('Failed to load monthly grid', e);
         } finally {
@@ -61,10 +87,26 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
     const days = getDaysInMonth(currentMonth);
 
     // Helpers to access data safely
-    const getMoment = (date: string) => dailyLogs.find(l => l.date === date)?.moment || '';
-    const getHabitStatus = (date: string, habitId: string) => {
-        const log = habitLogs.find(l => l.date === date && l.habitId === habitId);
-        return log ? log.status : 'PENDING';
+    const getMoment = (date: string) => dailyMoments[date] || '';
+
+    const getHabitStatus = (date: string, taskId: string) => {
+        const status = habitLogs[`${date}-${taskId}`];
+        if (status) return status;
+
+        // Infer default status
+        // If date is in future: PENDING
+        // If date is past: NOT_DONE (or SKIPPED if we tracked it, but we don't for now)
+        const dateObj = new Date(date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // compare dates only
+        // Correct date comparison (offset issues? use string comparison for local dates if possible)
+        // Simple string compare YYYY-MM-DD works if ISO
+        const todayStr = getLocalDateString();
+
+        if (date > todayStr) return 'PENDING';
+        if (date === todayStr) return 'PENDING'; // Or NOT_DONE if end of day? Keep pending for today.
+
+        return 'NOT_DONE';
     };
 
     if (loading) return <div className="py-12 text-center text-muted">Loading grid...</div>;
@@ -77,8 +119,8 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
                         <th className="py-2 px-3 text-left font-normal w-12 bg-white">Date</th>
                         <th className="py-2 px-3 text-left font-normal max-w-[200px] bg-white">Small Moment</th>
                         {habits.map(h => (
-                            <th key={h.id} className="py-2 px-3 text-center font-normal w-12 bg-white" title={h.name}>
-                                {h.name.slice(0, 8)}...
+                            <th key={h.id} className="py-2 px-3 text-center font-normal w-12 bg-white" title={h.content}>
+                                {h.content.slice(0, 8)}...
                             </th>
                         ))}
                     </tr>
@@ -87,11 +129,9 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
                     {days.map(date => {
                         const dayNum = date.split('-')[2];
                         const dateObj = new Date(date);
-                        const isToday = date === new Date().toLocaleDateString('en-CA');
-                        const isFuture = dateObj > new Date();
+                        const isToday = date === getLocalDateString();
+                        const isFuture = date > getLocalDateString();
 
-                        // Skip rendering future days completely or just dim them? 
-                        // Let's render but dim.
                         const rowClass = isFuture ? 'opacity-30' : 'hover:bg-gray-50';
                         const todayClass = isToday ? 'bg-accent/5 ring-1 ring-accent/20' : '';
 
@@ -109,11 +149,11 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
                                     let color = 'text-gray-300';
                                     if (status === 'DONE') color = 'text-green-500 font-bold';
                                     if (status === 'NOT_DONE') color = 'text-red-300';
-                                    if (status === 'SKIPPED') color = 'text-gray-400';
+                                    if (status === 'PENDING') color = 'text-gray-300';
 
                                     return (
                                         <td key={h.id} className={`py-3 px-3 text-center ${color}`}>
-                                            {STATE_ICONS[status as keyof typeof STATE_ICONS]}
+                                            {STATE_ICONS[status as keyof typeof STATE_ICONS] || status}
                                         </td>
                                     );
                                 })}
@@ -125,7 +165,7 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
 
             {habits.length === 0 && (
                 <div className="text-center py-6 text-muted text-sm italic">
-                    No habits set up yet. Use "Manage Habits" to start tracking.
+                    No recurring habits yet.
                 </div>
             )}
         </div>

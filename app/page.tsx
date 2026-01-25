@@ -1,17 +1,28 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getLocalDate } from '@/lib/utils';
-import { useRouter } from 'next/navigation';
-import type { Idea } from '@/types';
+import { useState, useEffect, useCallback } from 'react';
+import { getLocalDate, getLocalDateString, isTaskEffectivelyComplete } from '@/lib/schema';
 import DailyLog from '@/components/Habits/DailyLog';
 import MonthlyGrid from '@/components/Habits/MonthlyGrid';
+import { goalsDB, tasksDB } from '@/lib/db';
+import type { Goal, Task } from '@/lib/schema';
+import GoalCreator from '@/components/GoalCreator';
+import { RecurringIcon, CheckIcon, EditIcon, CloseIcon, PlusIcon, EffortLightIcon, EffortMediumIcon, EffortHeavyIcon } from '@/components/icons';
+import Tooltip from '@/components/Tooltip';
+import EmptyState from '@/components/EmptyState';
 
 // --- TaskItem Component (Calm Design) ---
-const TaskItem = ({ task, ideaId, compact, onComplete, onToggleRepetitive, onDrop, onEdit }: {
+// Updated to use new Task schema
+const TaskItem = ({
+    task,
+    goalId,
+    onComplete,
+    onToggleRepetitive,
+    onDrop,
+    onEdit
+}: {
     task: Task,
-    ideaId: string,
-    compact?: boolean,
+    goalId: string,
     onComplete: () => void,
     onToggleRepetitive: () => void,
     onDrop: () => void,
@@ -19,6 +30,8 @@ const TaskItem = ({ task, ideaId, compact, onComplete, onToggleRepetitive, onDro
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editContent, setEditContent] = useState(task.content);
+
+    const isComplete = isTaskEffectivelyComplete(task);
 
     const handleSave = () => {
         if (editContent.trim() && editContent !== task.content) {
@@ -35,22 +48,21 @@ const TaskItem = ({ task, ideaId, compact, onComplete, onToggleRepetitive, onDro
         }
     };
 
-    // Focus input on edit
-    // (Manual focus ref or simple autoFocus attribute works mostly)
-
-    // Update local state if prop changes
     useEffect(() => {
         setEditContent(task.content);
     }, [task.content]);
 
     return (
-        <div className={`flex items-start gap-3 p-3 rounded-xl border bg-white hover:shadow-sm transition-all group/task border-border`}>
+        <div className={`flex items-start gap-3 p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 group/task ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
             <button
                 onClick={onComplete}
-                className={`flex-shrink-0 w-5 h-5 mt-0.5 rounded-md border-2 border-accent text-white hover:bg-accent/10 flex items-center justify-center transition-colors`}
-                title="Mark done"
+                className={`flex-shrink-0 w-5 h-5 mt-0.5 rounded-md border-2 flex items-center justify-center transition-colors ${isComplete
+                    ? 'bg-accent border-accent text-white'
+                    : 'border-accent text-transparent hover:bg-accent/10'
+                    }`}
+                title={isComplete ? "Mark incomplete" : "Mark done"}
             >
-                {/* Empty circle */}
+                {isComplete && <CheckIcon />}
             </button>
 
             <div className="flex-1 min-w-0 flex flex-col gap-1">
@@ -67,19 +79,25 @@ const TaskItem = ({ task, ideaId, compact, onComplete, onToggleRepetitive, onDro
                             />
                         ) : (
                             <div className="flex items-start gap-2">
-                                <p className={`text-foreground font-medium break-words whitespace-normal`}>
+                                <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'line-through text-muted' : ''}`}>
                                     {task.content}
                                 </p>
-                                {task.targetDate && (
-                                    <span className="text-xs text-muted flex-shrink-0 mt-1">
-                                        {new Date(task.targetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                    </span>
-                                )}
-                                {task.isRepetitive && (
-                                    <span className="text-[10px] text-indigo-500 bg-indigo-50 px-1.5 rounded flex-shrink-0 mt-1" title="Daily recurring">
-                                        🔁
-                                    </span>
-                                )}
+                                <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+                                    {/* Effort Indicator */}
+                                    <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
+                                        <span className="text-muted/60 inline-flex items-center">
+                                            {task.effortLabel === 'light' && <EffortLightIcon />}
+                                            {task.effortLabel === 'medium' && <EffortMediumIcon />}
+                                            {task.effortLabel === 'heavy' && <EffortHeavyIcon />}
+                                        </span>
+                                    </Tooltip>
+                                    {/* Target Date removed from TaskItem as it belongs to Goal now */}
+                                    {task.isRecurring && (
+                                        <span className="text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center" title="Daily recurring">
+                                            <RecurringIcon size={11} />
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -90,21 +108,21 @@ const TaskItem = ({ task, ideaId, compact, onComplete, onToggleRepetitive, onDro
                             className="p-1.5 text-gray-400 hover:text-accent hover:bg-gray-50 rounded-lg transition-colors"
                             title="Edit text"
                         >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                            <EditIcon />
                         </button>
                         <button
                             onClick={onToggleRepetitive}
-                            className={`p-1.5 rounded-lg transition-colors ${task.isRepetitive ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-500 hover:bg-gray-50'}`}
-                            title={task.isRepetitive ? "Stop repeating" : "Make daily habit"}
+                            className={`p-1.5 rounded-lg transition-colors ${task.isRecurring ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-500 hover:bg-gray-50'}`}
+                            title={task.isRecurring ? "Stop repeating" : "Make daily habit"}
                         >
-                            <span className="text-xs">🔁</span>
+                            <RecurringIcon size={13} />
                         </button>
                         <button
                             onClick={onDrop}
                             className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                             title="Drop task"
                         >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            <CloseIcon />
                         </button>
                     </div>
                 </div>
@@ -113,370 +131,167 @@ const TaskItem = ({ task, ideaId, compact, onComplete, onToggleRepetitive, onDro
     );
 };
 
-
-interface Task {
-    id: string;
-    content: string;
-    type: string;
-    completed: boolean;
-    isRepetitive: boolean; // NEW
-    order: number;
-    priority?: 'NOW' | 'SOON' | 'SOMEDAY';
-    targetDate?: string;
-}
-
-interface IdeaWithTasks extends Idea {
-    tasks?: Task[];
-    rationale?: string;
+interface GoalWithTasks extends Goal {
+    tasks: Task[];
 }
 
 export default function HomePage() {
-    const router = useRouter();
-    const [ideas, setIdeas] = useState<IdeaWithTasks[]>([]);
-    const [newIdea, setNewIdea] = useState('');
-    const [targetDate, setTargetDate] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [breakingDown, setBreakingDown] = useState(false);
+    const [goals, setGoals] = useState<GoalWithTasks[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [showCreator, setShowCreator] = useState(false);
 
     // Habit Tracker State
     const [view, setView] = useState<'GOALS' | 'HABITS'>('GOALS');
-
     const [today] = useState(getLocalDate());
     const [currentMonth] = useState(getLocalDate().substring(0, 7));
 
-
-    const [skippedTaskIds, setSkippedTaskIds] = useState<Set<string>>(new Set());
     const [collapsedGoals, setCollapsedGoals] = useState<Set<string>>(new Set());
 
+    // Initialize all goals as collapsed on first load
     useEffect(() => {
-        fetchIdeas();
+        if (goals.length > 0 && collapsedGoals.size === 0) {
+            const allGoalIds = new Set(goals.map(g => g.id));
+            setCollapsedGoals(allGoalIds);
+        }
+    }, [goals]);
+
+    const loadGoals = useCallback(async () => {
+        try {
+            const allGoals = await goalsDB.getAll();
+            const allTasks = await tasksDB.getAll();
+
+            const goalsWithTasks: GoalWithTasks[] = allGoals.map((goal) => ({
+                ...goal,
+                tasks: allTasks
+                    .filter((t) => t.goalId === goal.id)
+                    .sort((a, b) => a.order - b.order),
+            }));
+
+            // Sort: active first, then by creation date
+            goalsWithTasks.sort((a, b) => {
+                if (a.status !== b.status) {
+                    return a.status === 'active' ? -1 : 1;
+                }
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
+
+            setGoals(goalsWithTasks);
+        } catch (error) {
+            console.error('Failed to load goals:', error);
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const toggleGoalCollapse = (ideaId: string) => {
+    useEffect(() => {
+        loadGoals();
+    }, [loadGoals]);
+
+    const toggleGoalCollapse = (goalId: string) => {
         setCollapsedGoals(prev => {
             const next = new Set(prev);
-            if (next.has(ideaId)) {
-                next.delete(ideaId);
+            if (next.has(goalId)) {
+                next.delete(goalId);
             } else {
-                next.add(ideaId);
+                next.add(goalId);
             }
             return next;
         });
     };
 
-    const fetchIdeas = async () => {
+    const handleGoalCreatorComplete = () => {
+        setShowCreator(false);
+        loadGoals();
+    };
+
+    // Task Actions
+    const handleCompleteTask = async (taskId: string, currentStatus: boolean, totalMinutes: number) => {
         try {
-            const res = await fetch('/api/ideas');
-            if (!res.ok) {
-                const text = await res.text();
-                console.error('API error:', res.status, text);
-                throw new Error(`Failed to fetch ideas: ${res.status}`);
+            const task = await tasksDB.getById(taskId);
+            if (!task) return;
+
+            await tasksDB.update(taskId, {
+                completedMinutes: currentStatus ? 0 : totalMinutes // Toggle completion
+            });
+
+            // Check if goal is now complete
+            const result = await goalsDB.checkAndCompleteGoal(task.goalId);
+            if (result.completed && result.isDaily) {
+                // Daily goal completed - will be hidden from home page for today
+                console.log('Daily goal completed and reset for tomorrow');
             }
-            const data = await res.json();
-            setIdeas(data);
 
-            // Auto collapse all initially to keep it calm
-            const ids = new Set(data.map((i: any) => i.id));
-            setCollapsedGoals(ids as Set<string>);
+            await loadGoals();
         } catch (error) {
-            console.error('Error fetching ideas:', error);
-            setIdeas([]);
+            console.error('Error completing task:', error);
         }
     };
 
-    const handleAddIdea = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newIdea.trim()) return;
-
-        setLoading(true);
+    const handleToggleRepetitive = async (taskId: string, currentStatus: boolean) => {
         try {
-            const res = await fetch('/api/ideas', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    content: newIdea,
-                    // Defaults for Calm Mode
-                    priority: 'MEDIUM',
-                    targetDate: null
-                }),
-            });
-
-            if (res.ok) {
-                const idea = await res.json();
-                setIdeas([idea, ...ideas]);
-                setNewIdea('');
-            }
-        } catch (error) {
-            console.error('Error adding idea:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleBreakDownAll = async () => {
-        setBreakingDown(true);
-        try {
-            for (const idea of ideas) {
-                if (!idea.steps || idea.steps.length === 0) {
-                    await processIdea(idea);
-                }
-            }
-            await fetchIdeas();
-        } catch (error) {
-            console.error('Error breaking down ideas:', error);
-        } finally {
-            setBreakingDown(false);
-        }
-    };
-
-    const processIdea = async (idea: Idea) => {
-        try {
-            const clarifyRes = await fetch('/api/ai/clarify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ idea: idea.content }),
-            });
-            const { clarified } = await clarifyRes.json();
-
-            await fetch(`/api/ideas/${idea.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ clarifiedContent: clarified }),
-            });
-
-            const decomposeRes = await fetch('/api/ai/decompose', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    clarifiedIdea: clarified,
-                    targetDate: idea.targetDate,
-                }),
-            });
-            const { tasks } = await decomposeRes.json();
-
-            await fetch('/api/steps', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ideaId: idea.id,
-                    tasks,
-                }),
-            });
-        } catch (error) {
-            console.error('Error processing idea:', idea.id, error);
-        }
-    };
-
-    const handleToggleRepetitive = async (ideaId: string, taskId: string, currentStatus: boolean) => {
-        try {
-            const newStatus = !currentStatus;
-            await fetch(`/api/steps/${taskId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ isRepetitive: newStatus }),
-            });
-
-            setIdeas(prevIdeas =>
-                prevIdeas.map(idea => {
-                    if (idea.steps) {
-                        return {
-                            ...idea,
-                            steps: idea.steps.map(step =>
-                                step.id === taskId ? { ...step, isRepetitive: newStatus } : step
-                            ),
-                        };
-                    }
-                    return idea;
-                })
-            );
+            await tasksDB.update(taskId, { isRecurring: !currentStatus });
+            await loadGoals();
         } catch (error) {
             console.error('Error toggling repetitive:', error);
         }
     };
 
-    const handleCompleteTask = async (ideaId: string, taskId: string) => {
+    const handleDropTask = async (taskId: string, taskContent: string) => {
+        if (!confirm(`Archive "${taskContent}"? You can restore it later if needed.`)) return;
         try {
-            // Optimistic update
-            setIdeas(prevIdeas =>
-                prevIdeas.map(idea => {
-                    if (idea.id === ideaId && idea.steps) {
-                        return {
-                            ...idea,
-                            steps: idea.steps.map(step =>
-                                step.id === taskId
-                                    ? { ...step, completed: true }
-                                    : step
-                            ),
-                        };
-                    }
-                    return idea;
-                })
-            );
-
-            await fetch(`/api/steps/${taskId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ completed: true }),
-            });
+            await tasksDB.archive(taskId);
+            await loadGoals();
         } catch (error) {
-            console.error('Error completing task:', error);
-            await fetchIdeas(); // Revert on error
+            console.error('Error archiving task:', error);
         }
     };
 
-    const handleUncompleteTask = async (ideaId: string, taskId: string) => {
+    const handleEditTask = async (taskId: string, newContent: string) => {
         try {
-            // Optimistic update
-            setIdeas(prevIdeas =>
-                prevIdeas.map(idea => {
-                    if (idea.id === ideaId && idea.steps) {
-                        return {
-                            ...idea,
-                            steps: idea.steps.map(step =>
-                                step.id === taskId
-                                    ? { ...step, completed: false }
-                                    : step
-                            ),
-                        };
-                    }
-                    return idea;
-                })
-            );
-
-            await fetch(`/api/steps/${taskId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ completed: false }),
-            });
+            await tasksDB.update(taskId, { content: newContent });
+            await loadGoals();
         } catch (error) {
-            console.error('Error uncompleting task:', error);
-            await fetchIdeas();
+            console.error('Error editing task:', error);
         }
     };
 
-    const handleToggleGoalRepetitive = async (ideaId: string) => {
-        const idea = ideas.find(i => i.id === ideaId);
-        if (!idea || !idea.steps) return;
+    const handleDeleteGoal = async (goalId: string, goalContent: string) => {
+        if (!confirm(`Delete "${goalContent}" and all its tasks?`)) return;
+        try {
+            // Delete all tasks for this goal
+            const goalTasks = await tasksDB.getByGoalId(goalId);
+            await Promise.all(goalTasks.map(t => tasksDB.delete(t.id)));
+            // Delete goal
+            await goalsDB.delete(goalId);
+            await loadGoals();
+        } catch (error) {
+            console.error('Error deleting goal:', error);
+        }
+    };
 
-        const allRepetitive = idea.steps.every(s => s.isRepetitive);
+    const handleToggleGoalRepetitive = async (goal: GoalWithTasks) => {
+        const allRepetitive = goal.tasks.every(s => s.isRecurring);
         const newStatus = !allRepetitive;
 
-        // Optimistic
-        setIdeas(prevIdeas =>
-            prevIdeas.map(i => {
-                if (i.id === ideaId && i.steps) {
-                    return {
-                        ...i,
-                        steps: i.steps.map(s => ({ ...s, isRepetitive: newStatus }))
-                    };
-                }
-                return i;
-            })
-        );
-
-        // API calls (parallel)
         try {
             await Promise.all(
-                idea.steps.map(s =>
-                    fetch(`/api/steps/${s.id}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ isRepetitive: newStatus })
-                    })
-                )
+                goal.tasks.map(s => tasksDB.update(s.id, { isRecurring: newStatus }))
             );
+            await loadGoals();
         } catch (e) {
             console.error("Error toggling goal repetitive", e);
         }
     };
 
-    const handleDropTask = async (ideaId: string, taskId: string, taskContent: string) => {
-        if (!confirm(`Drop "${taskContent}"? This is okay.`)) {
-            return;
-        }
-
-        try {
-            await fetch(`/api/steps/${taskId}`, {
-                method: 'DELETE',
-            });
-
-            setIdeas(prevIdeas =>
-                prevIdeas.map(idea => {
-                    if (idea.id === ideaId && idea.steps) {
-                        return {
-                            ...idea,
-                            steps: idea.steps.filter(step => step.id !== taskId),
-                        };
-                    }
-                    return idea;
-                })
-            );
-        } catch (error) {
-            console.error('Error deleting task:', error);
-        }
-    };
-
-    const handleEditTask = async (ideaId: string, taskId: string, newContent: string) => {
-        try {
-            // Optimistic
-            setIdeas(prevIdeas =>
-                prevIdeas.map(idea => {
-                    if (idea.id === ideaId && idea.steps) {
-                        return {
-                            ...idea,
-                            steps: idea.steps.map(step =>
-                                step.id === taskId ? { ...step, content: newContent } : step
-                            ),
-                        };
-                    }
-                    return idea;
-                })
-            );
-
-            await fetch(`/api/steps/${taskId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: newContent }),
-            });
-        } catch (error) {
-            console.error('Error editing task:', error);
-            await fetchIdeas();
-        }
-    };
-
-    const handleDeleteIdea = async (ideaId: string, ideaContent: string) => {
-        if (!confirm(`Delete "${ideaContent}" and all its tasks?`)) {
-            return;
-        }
-
-        try {
-            await fetch(`/api/ideas/${ideaId}`, {
-                method: 'DELETE',
-            });
-            setIdeas(prevIdeas => prevIdeas.filter(idea => idea.id !== ideaId));
-        } catch (error) {
-            console.error('Error deleting idea:', error);
-        }
-    };
-
     // Helper: Get the single focus task for Collapsed View
     const getHeaderTask = (tasks: Task[]) => {
-        const incomplete = tasks.filter(t => !t.completed && !skippedTaskIds.has(t.id));
+        // Filter incomplete tasks
+        const incomplete = tasks.filter(t => !isTaskEffectivelyComplete(t));
         if (incomplete.length === 0) return null;
 
-        // 1. Highest Priority (NOW)
-        const nowTasks = incomplete.filter(t => t.priority === 'NOW');
-        if (nowTasks.length > 0) return nowTasks[0]; // Top NOW task
-
-        // 2. Fallback to SOON
-        const soonTasks = incomplete.filter(t => t.priority === 'SOON');
-        if (soonTasks.length > 0) return soonTasks[0];
-
-        // 3. Fallback to anything left
+        // Simple heuristic: return first incomplete task
         return incomplete[0];
     };
-
-    const hasUnprocessedIdeas = ideas.some(idea => !idea.steps || idea.steps.length === 0);
 
     return (
         <div className="max-w-4xl mx-auto px-6 py-12 animate-fadeIn">
@@ -531,182 +346,177 @@ export default function HomePage() {
             {/* GOALS VIEW */}
             {view === 'GOALS' && (
                 <>
-                    {/* Idea Input Form */}
-                    <form onSubmit={handleAddIdea} className="mb-12 max-w-2xl mx-auto">
-                        <div className="relative group">
-                            <textarea
-                                value={newIdea}
-                                onChange={(e) => setNewIdea(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleAddIdea(e);
-                                    }
-                                }}
-                                placeholder="What's on your mind? (e.g., 'I want to write a book' or 'Get fit')"
-                                className="w-full px-6 py-4 pr-32 text-lg bg-white border-2 border-border/60 hover:border-accent/40 focus:border-accent rounded-2xl focus:outline-none resize-none shadow-sm transition-all placeholder:text-muted/60"
-                                rows={1}
-                                style={{ minHeight: '64px' }}
-                            />
-                            <div className="absolute right-2 top-2 bottom-2 flex items-center">
-                                <button
-                                    type="submit"
-                                    disabled={loading || !newIdea.trim()}
-                                    className="h-full px-6 bg-foreground text-white rounded-xl disabled:opacity-30 disabled:cursor-not-allowed font-medium transition-all flex items-center justify-center"
-                                >
-                                    {loading ? (
-                                        <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    ) : (
-                                        <span>Add Goal ✨</span>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                        <p className="text-center text-xs text-muted mt-3">
-                            Just type your goal. I'll break it down for you.
-                        </p>
-                    </form>
-
-                    {/* Break Down All Button */}
-                    {hasUnprocessedIdeas && ideas.length > 0 && (
-                        <div className="mb-8 text-center animate-fadeIn">
+                    {/* Goal Creator */}
+                    {!showCreator && (
+                        <div className="text-center mb-8">
                             <button
-                                onClick={handleBreakDownAll}
-                                disabled={breakingDown}
-                                className="px-8 py-3 bg-accent text-white rounded-xl hover:bg-accent-hover disabled:opacity-50 font-medium text-lg shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all"
+                                onClick={() => setShowCreator(true)}
+                                className="px-8 py-3 bg-foreground text-white rounded-xl hover:opacity-90 hover:scale-105 active:scale-95 transition-all font-medium flex items-center gap-2 mx-auto shadow-sm"
                             >
-                                {breakingDown ? '🤖 AI Breaking Down Goals...' : '✨ Break Down Goals into Tasks'}
+                                <PlusIcon size={18} />
+                                Add New Goal
                             </button>
-                            <p className="text-sm text-muted mt-2">
-                                AI will create smart daily tasks for each goal
+                            <p className="text-sm text-muted mt-3">
+                                Start something new. We'll help you break it down.
                             </p>
                         </div>
                     )}
 
+                    {showCreator && (
+                        <div className="mb-12 max-w-2xl mx-auto">
+                            <GoalCreator
+                                onComplete={handleGoalCreatorComplete}
+                                onCancel={() => setShowCreator(false)}
+                            />
+                        </div>
+                    )}
+
                     {/* Ideas & Tasks List */}
-                    <div className="space-y-6">
-                        {ideas.length === 0 ? (
-                            <div className="text-center py-12 text-muted border-2 border-dashed border-border rounded-2xl">
-                                <p className="text-lg">No goals yet. Start by adding one above! ✨</p>
-                            </div>
+                    <div className="space-y-3">
+                        {goals.length === 0 && !showCreator ? (
+                            <EmptyState
+                                icon="goals"
+                                title="No goals yet"
+                                description="Start by adding your first goal above. We'll help you break it down into manageable steps."
+                            />
                         ) : (
                             <>
                                 {/* Active Ideas List */}
-                                {ideas
-                                    .filter(idea =>
-                                        !idea.steps ||
-                                        idea.steps.length === 0 ||
-                                        idea.steps.some(s => !s.completed)
-                                    )
-                                    .map((idea) => {
-                                        const allTasks = idea.steps ? (idea.steps as Task[]) : [];
-                                        const isGoalCollapsed = collapsedGoals.has(idea.id);
-                                        const isGoalRepetitive = allTasks.length > 0 && allTasks.every(t => t.isRepetitive);
+                                {goals
+                                    .filter(goal => {
+                                        // Hide completed one-time goals (they move to Journey)
+                                        if (goal.status === 'completed') return false;
+
+                                        // For daily goals (lifelong), hide if all tasks are complete today
+                                        if (goal.lifelong) {
+                                            const allTasksComplete = goal.tasks.length > 0 && goal.tasks.every(t =>
+                                                isTaskEffectivelyComplete(t)
+                                            );
+                                            if (allTasksComplete) return false;
+                                        }
+
+                                        return true;
+                                    })
+                                    .map((goal) => {
+                                        const allTasks = goal.tasks;
+                                        const isGoalCollapsed = collapsedGoals.has(goal.id);
+                                        const isGoalRepetitive = allTasks.length > 0 && allTasks.every(t => t.isRecurring);
 
                                         const headerTask = getHeaderTask(allTasks);
-                                        const completedCount = allTasks.filter(t => t.completed).length;
+                                        const completedCount = allTasks.filter(t => isTaskEffectivelyComplete(t)).length;
+
+                                        // Auto-collapse if all tasks done or explicitly collapsed
+                                        // Default behavior: expanded unless collapsed. 
+                                        // But old page auto-collapsed initially.
+                                        // Let's rely on `collapsedGoals` state, which we didn't init with all IDs, so they start expanded?
+                                        // Old page init: `setCollapsedGoals(ids as Set<string>);`
+                                        // I removed that init, so they start expanded. That's fine, or I can init it. 
+                                        // Let's default to expanded, cleaner.
+
+                                        const goalProgress = allTasks.length > 0
+                                            ? (completedCount / allTasks.length) * 100
+                                            : 0;
 
                                         return (
                                             <div
-                                                key={idea.id}
-                                                className="bg-white border-2 border-border rounded-2xl overflow-hidden hover:shadow-md transition-shadow group mb-6"
+                                                key={goal.id}
+                                                className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-sm hover:border-gray-300 transition-all duration-200 group mb-3 animate-fadeIn"
+                                                style={{ animationDelay: `${goals.indexOf(goal) * 50}ms` }}
                                             >
-                                                {/* Idea Header (Always Visible) */}
+                                                {/* Goal Header */}
                                                 <div
-                                                    className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
-                                                    onClick={() => toggleGoalCollapse(idea.id)}
+                                                    className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                                                    onClick={() => toggleGoalCollapse(goal.id)}
                                                 >
                                                     <div className="flex items-start justify-between gap-4">
                                                         <div className="flex-1">
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                <h2 className="text-2xl font-light text-foreground">
-                                                                    {idea.content}
+                                                            <div className="flex items-center gap-3 mb-2">
+                                                                <h2 className="text-lg font-medium text-foreground">
+                                                                    {goal.content}
                                                                 </h2>
                                                                 {isGoalRepetitive && (
-                                                                    <span className="text-indigo-500 bg-indigo-50 px-2 py-1 rounded text-xs" title="Daily Goal">
-                                                                        🔁
+                                                                    <span className="text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 font-medium" title="Daily Goal">
+                                                                        <RecurringIcon size={10} />
+                                                                        Daily
                                                                     </span>
                                                                 )}
-                                                                <button
-                                                                    className="text-muted hover:text-accent p-1 transition-transform duration-200"
-                                                                    style={{ transform: isGoalCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
-                                                                >
-                                                                    ▼
-                                                                </button>
                                                             </div>
 
-                                                            {/* Collapsed Summary: Show Header Task if exists */}
-                                                            {isGoalCollapsed && headerTask ? (
-                                                                <div className="mt-2 flex items-center gap-3 animate-fadeIn">
-                                                                    <div className="flex-1 bg-accent/5 border border-accent/20 rounded-lg p-3 flex items-center justify-between gap-4">
-                                                                        <span className="text-foreground font-medium truncate">{headerTask.content}</span>
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                handleCompleteTask(idea.id, headerTask.id);
-                                                                            }}
-                                                                            className="px-3 py-1 bg-accent/10 hover:bg-accent text-accent hover:text-white rounded-md text-xs font-bold uppercase tracking-wider transition-colors"
-                                                                        >
-                                                                            Done
-                                                                        </button>
+                                                            {/* Progress bar for collapsed view */}
+                                                            {isGoalCollapsed && allTasks.length > 0 && (
+                                                                <div className="flex items-center gap-3 text-xs text-muted">
+                                                                    <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                                                        <div
+                                                                            className="h-full bg-accent rounded-full transition-all"
+                                                                            style={{ width: `${goalProgress}%` }}
+                                                                        />
                                                                     </div>
-                                                                    {completedCount > 0 && (
-                                                                        <span className="text-xs text-muted whitespace-nowrap">
-                                                                            {completedCount} done
-                                                                        </span>
-                                                                    )}
+                                                                    <span className="whitespace-nowrap">
+                                                                        {completedCount} of {allTasks.length}
+                                                                    </span>
                                                                 </div>
-                                                            ) : isGoalCollapsed ? (
-                                                                <p className="text-sm text-muted">No pending tasks.</p>
-                                                            ) : null}
+                                                            )}
+
                                                         </div>
 
-                                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <div className="flex items-center gap-2">
                                                             <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleToggleGoalRepetitive(idea.id);
-                                                                }}
-                                                                className={`p-2 rounded transition-colors ${isGoalRepetitive ? 'text-indigo-600 bg-indigo-50' : 'text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                                                                title="Make all tasks daily habits"
+                                                                className="text-muted/60 hover:text-foreground transition-transform duration-200 p-1"
+                                                                style={{ transform: isGoalCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+                                                                title={isGoalCollapsed ? 'Expand' : 'Collapse'}
                                                             >
-                                                                🔁
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleDeleteIdea(idea.id, idea.content);
-                                                                }}
-                                                                className="text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors text-sm font-medium"
-                                                                title="Delete goal"
-                                                            >
-                                                                Drop
+                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <polyline points="6 9 12 15 18 9" />
+                                                                </svg>
                                                             </button>
                                                         </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 right-4">
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleToggleGoalRepetitive(goal);
+                                                            }}
+                                                            className={`p-2 rounded transition-colors ${isGoalRepetitive ? 'text-indigo-600 bg-indigo-50' : 'text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                                            title="Make all tasks daily habits"
+                                                        >
+                                                            <RecurringIcon size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDeleteGoal(goal.id, goal.content);
+                                                            }}
+                                                            className="text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors text-sm font-medium"
+                                                            title="Delete goal"
+                                                        >
+                                                            Drop
+                                                        </button>
                                                     </div>
                                                 </div>
 
                                                 {/* Expanded Content: Tasks */}
                                                 {!isGoalCollapsed && (
-                                                    <div className="p-6 pt-0 animate-slideDown space-y-4">
+                                                    <div className="px-4 pb-4 pt-0 animate-slideDown space-y-3">
 
                                                         {/* Incomplete Tasks (Flat List) */}
                                                         <div className="space-y-3">
-                                                            {allTasks.filter(t => !t.completed).map(task => (
+                                                            {allTasks.filter(t => !isTaskEffectivelyComplete(t)).map(task => (
                                                                 <TaskItem
                                                                     key={task.id}
                                                                     task={task}
-                                                                    ideaId={idea.id}
-                                                                    onComplete={() => handleCompleteTask(idea.id, task.id)}
-                                                                    onToggleRepetitive={() => handleToggleRepetitive(idea.id, task.id, task.isRepetitive)}
-                                                                    onDrop={() => handleDropTask(idea.id, task.id, task.content)}
-                                                                    onEdit={(newContent) => handleEditTask(idea.id, task.id, newContent)}
+                                                                    goalId={goal.id}
+                                                                    onComplete={() => handleCompleteTask(task.id, false, task.estimatedTotalMinutes)}
+                                                                    onToggleRepetitive={() => handleToggleRepetitive(task.id, task.isRecurring)}
+                                                                    onDrop={() => handleDropTask(task.id, task.content)}
+                                                                    onEdit={(newContent) => handleEditTask(task.id, newContent)}
                                                                 />
                                                             ))}
                                                         </div>
 
                                                         {/* Incomplete Placeholder */}
-                                                        {allTasks.filter(t => !t.completed).length === 0 && allTasks.length > 0 && (
+                                                        {allTasks.filter(t => !isTaskEffectivelyComplete(t)).length === 0 && allTasks.length > 0 && (
                                                             <div className="text-center py-8 text-muted/60 italic">
                                                                 All tasks done! Enjoy the moment.
                                                             </div>
@@ -720,14 +530,14 @@ export default function HomePage() {
                                                                     Completed ({completedCount})
                                                                 </summary>
                                                                 <div className="space-y-2 pl-2">
-                                                                    {allTasks.filter(t => t.completed).map(task => (
+                                                                    {allTasks.filter(t => isTaskEffectivelyComplete(t)).map(task => (
                                                                         <div key={task.id} className="flex items-center gap-3 p-2 rounded-lg opacity-50 hover:opacity-100 transition-opacity">
                                                                             <button
-                                                                                onClick={() => handleUncompleteTask(idea.id, task.id)}
+                                                                                onClick={() => handleCompleteTask(task.id, true, task.estimatedTotalMinutes)}
                                                                                 className="w-4 h-4 rounded border-2 border-green-500 bg-green-500 text-white flex items-center justify-center"
                                                                                 title="Mark incomplete"
                                                                             >
-                                                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                                                <CheckIcon size={10} />
                                                                             </button>
                                                                             <span className="text-sm line-through text-muted">{task.content}</span>
                                                                         </div>
@@ -741,30 +551,6 @@ export default function HomePage() {
                                         );
                                     })
                                 }
-
-                                {/* Done For Today (Recurring) */}
-                                {ideas.filter(i => {
-                                    const all = i.steps || [];
-                                    return all.length > 0 && all.every(t => t.completed) && all.every(t => t.isRepetitive);
-                                }).length > 0 && (
-                                        <div className="mt-12 pt-8 border-t border-border/50">
-                                            <h3 className="text-center text-muted font-normal uppercase tracking-widest text-sm mb-6">✅ Done for Today</h3>
-                                            <div className="opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-                                                {ideas.filter(i => {
-                                                    const all = i.steps || [];
-                                                    return all.length > 0 && all.every(t => t.completed) && all.every(t => t.isRepetitive);
-                                                }).map(idea => (
-                                                    <div key={idea.id} className="bg-gray-50 border border-border/50 rounded-xl p-4 mb-4 flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-indigo-300">🔁</span>
-                                                            <span className="text-muted line-through decoration-muted/50">{idea.content}</span>
-                                                        </div>
-                                                        <span className="text-xs text-muted/50 font-medium">Resetting tomorrow</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
                             </>
                         )}
                     </div>

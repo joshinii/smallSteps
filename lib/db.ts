@@ -183,11 +183,46 @@ export const goalsDB = {
 
     async delete(id: string): Promise<void> {
         // Also delete associated tasks
-        const tasks = await tasksDB.getByGoalId(id);
-        for (const task of tasks) {
+        const goalTasks = await tasksDB.getByGoalId(id);
+        for (const task of goalTasks) {
             await tasksDB.delete(task.id);
         }
         return deleteById('goals', id);
+    },
+
+    /**
+     * Check if all tasks are complete and mark goal as completed
+     * For daily goals (lifelong), this resets tasks for next day
+     */
+    async checkAndCompleteGoal(goalId: string): Promise<{ completed: boolean; isDaily: boolean }> {
+        const goal = await this.getById(goalId);
+        if (!goal) return { completed: false, isDaily: false };
+
+        const allTasks = await tasksDB.getByGoalId(goalId);
+        const allTasksComplete = allTasks.length > 0 && allTasks.every(t =>
+            t.completedMinutes >= t.estimatedTotalMinutes * 0.85 // 85% threshold
+        );
+
+        if (!allTasksComplete) return { completed: false, isDaily: !!goal.lifelong };
+
+        if (goal.lifelong) {
+            // Daily goal: Reset all tasks for tomorrow
+            for (const task of allTasks) {
+                await tasksDB.update(task.id, {
+                    completedMinutes: 0,
+                    skipCount: 0,
+                    lastSkippedAt: undefined,
+                });
+            }
+            return { completed: true, isDaily: true };
+        } else {
+            // One-time goal: Mark as completed
+            await this.update(goalId, {
+                status: 'completed',
+                completedAt: getISOTimestamp(),
+            });
+            return { completed: true, isDaily: false };
+        }
     },
 };
 
@@ -197,7 +232,8 @@ export const goalsDB = {
 
 export const tasksDB = {
     async getAll(): Promise<Task[]> {
-        return getAll<Task>('tasks');
+        const all = await getAll<Task>('tasks');
+        return all.filter((t) => !t.archivedAt);
     },
 
     async getById(id: string): Promise<Task | undefined> {
@@ -206,12 +242,17 @@ export const tasksDB = {
 
     async getByGoalId(goalId: string): Promise<Task[]> {
         const tasks = await getByIndex<Task>('tasks', 'goalId', goalId);
-        return tasks.sort((a, b) => a.order - b.order);
+        return tasks.filter((t) => !t.archivedAt).sort((a, b) => a.order - b.order);
     },
 
     async getRecurring(): Promise<Task[]> {
         const all = await getAll<Task>('tasks');
-        return all.filter((t) => t.isRecurring);
+        return all.filter((t) => t.isRecurring && !t.archivedAt);
+    },
+
+    async getArchived(): Promise<Task[]> {
+        const all = await getAll<Task>('tasks');
+        return all.filter((t) => t.archivedAt);
     },
 
     async create(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
@@ -238,6 +279,14 @@ export const tasksDB = {
 
     async delete(id: string): Promise<void> {
         return deleteById('tasks', id);
+    },
+
+    async archive(id: string): Promise<Task | undefined> {
+        return this.update(id, { archivedAt: getISOTimestamp() });
+    },
+
+    async unarchive(id: string): Promise<Task | undefined> {
+        return this.update(id, { archivedAt: undefined });
     },
 
     async recordProgress(id: string, minutes: number): Promise<Task | undefined> {
@@ -308,6 +357,31 @@ export const taskProgressDB = {
     },
 
     async record(taskId: string, date: string, minutes: number): Promise<TaskProgress> {
+        // Check if progress already exists for this task+date
+        const db = await getDB();
+        const existing = await new Promise<TaskProgress | undefined>((resolve, reject) => {
+            const tx = db.transaction('taskProgress', 'readonly');
+            const store = tx.objectStore('taskProgress');
+            const index = store.index('taskId_date');
+            const request = index.get([taskId, date]);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+
+        if (existing) {
+            // Update existing progress
+            const updated: TaskProgress = {
+                ...existing,
+                minutesWorked: existing.minutesWorked + minutes,
+            };
+
+            // Update total on task
+            await tasksDB.recordProgress(taskId, minutes);
+
+            return put('taskProgress', updated);
+        }
+
+        // Create new progress entry
         const progress: TaskProgress = {
             id: generateId(),
             taskId,
