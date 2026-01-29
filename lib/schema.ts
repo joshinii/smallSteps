@@ -30,7 +30,7 @@ export interface Task {
     completedMinutes: number;
 
     // User-facing effort label
-    effortLabel: 'light' | 'medium' | 'heavy';
+    effortLabel: 'warm-up' | 'settle' | 'dive';
 
     isRecurring: boolean;
     order: number;
@@ -84,15 +84,15 @@ export interface AISettings {
 // ============================================
 
 export const EFFORT_MAPPING = {
-    light: { minMinutes: 5, maxMinutes: 10, avgMinutes: 7 },
-    medium: { minMinutes: 20, maxMinutes: 30, avgMinutes: 25 },
-    heavy: { minMinutes: 60, maxMinutes: 90, avgMinutes: 75 },
+    'warm-up': { minMinutes: 5, maxMinutes: 10, avgMinutes: 7 },
+    'settle': { minMinutes: 20, maxMinutes: 30, avgMinutes: 25 },
+    'dive': { minMinutes: 60, maxMinutes: 90, avgMinutes: 75 },
 } as const;
 
 export function minutesToEffortLabel(minutes: number): Task['effortLabel'] {
-    if (minutes <= 15) return 'light';
-    if (minutes <= 45) return 'medium';
-    return 'heavy';
+    if (minutes <= 15) return 'warm-up';
+    if (minutes <= 45) return 'settle';
+    return 'dive';
 }
 
 export function effortLabelToMinutes(label: Task['effortLabel']): number {

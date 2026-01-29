@@ -9,7 +9,7 @@ SmallSteps is a minimalist goal tracker designed to bridge the gap between big a
 ### 🌊 The Flow
 1. **Dream Big**: Input any goal, no matter how vague.
 2. **AI Action**: SmallSteps breaks it down into actionable daily tasks.
-3. **Daily Rhythm**: Log your "Small Moment" and track habits in a calm monthly grid.
+3. **Daily Rhythm**: Log your "Small Moment" in a calm monthly grid.
 4. **Milestones**: Reflect on your journey and celebrate the small wins.
 
 ---
@@ -24,7 +24,7 @@ SmallSteps is a minimalist goal tracker designed to bridge the gap between big a
 
 ### 📸 App Walkthrough
 
-| **Focus & Tasks** | **Daily Rhythm** |
+| **Focus & Tasks** | **Habits** |
 | :---: | :---: |
 | ![Goal Management](public/screenshots/home_page.png) | ![Habit Matrix](public/screenshots/habits_page.png) |
 | *Manage goals and get AI steps* | *Track recurring daily actions* |

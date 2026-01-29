@@ -3,16 +3,29 @@
 // SmallSteps Goal Creator Component
 // AI-assisted goal decomposition with calm, editable task review
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAI, useAIWithFallback } from '@/lib/ai/AIContext';
 import { goalsDB, tasksDB } from '@/lib/db';
 import { minutesToEffortLabel, generateId } from '@/lib/schema';
 import type { TaskSuggestion, GoalPlan } from '@/lib/ai/ai-provider';
 import { DragHandleIcon, CloseIcon, SparklesIcon } from '@/components/icons';
+import { assessTargetDateFeasibility, suggestTargetDate, reassessDailyPlans, assessTotalWorkload, type FeasibilityResult } from '@/lib/planning-engine';
 
 interface GoalCreatorProps {
     onComplete?: () => void;
     onCancel?: () => void;
+    existingGoal?: {
+        id: string;
+        content: string;
+        targetDate?: string;
+        lifelong?: boolean;
+        tasks: Array<{
+            id: string;
+            content: string;
+            estimatedMinutes: number;
+            isRecurring: boolean;
+        }>;
+    };
 }
 
 type Step = 'input' | 'processing' | 'review' | 'saving';
@@ -21,17 +34,29 @@ interface EditableTask extends TaskSuggestion {
     id: string;
 }
 
-export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) {
-    const [step, setStep] = useState<Step>('input');
-    const [goalText, setGoalText] = useState('');
-    const [targetDate, setTargetDate] = useState('');
-    const [isLifelong, setIsLifelong] = useState(false);
-    const [tasks, setTasks] = useState<EditableTask[]>([]);
+export default function GoalCreator({ onComplete, onCancel, existingGoal }: GoalCreatorProps) {
+    const isEditMode = !!existingGoal;
+
+    const [step, setStep] = useState<Step>(isEditMode ? 'review' : 'input');
+    const [goalText, setGoalText] = useState(existingGoal?.content || '');
+    const [targetDate, setTargetDate] = useState(existingGoal?.targetDate || '');
+    const [isLifelong, setIsLifelong] = useState(existingGoal?.lifelong || false);
+    const [tasks, setTasks] = useState<EditableTask[]>(
+        existingGoal?.tasks.map(t => ({
+            id: t.id,
+            content: t.content,
+            estimatedMinutes: t.estimatedMinutes,
+            isRecurring: t.isRecurring,
+        })) || []
+    );
     const [rationale, setRationale] = useState('');
     const [suggestedDate, setSuggestedDate] = useState('');
     const [error, setError] = useState('');
     const [regenerationComment, setRegenerationComment] = useState('');
     const [isRegenerating, setIsRegenerating] = useState(false);
+    const [feasibility, setFeasibility] = useState<FeasibilityResult | null>(null);
+    const [showFeasibilityWarning, setShowFeasibilityWarning] = useState(false);
+    const [workloadWarning, setWorkloadWarning] = useState<string | null>(null);
 
     const { openSetupModal, isConfigured, provider } = useAI();
     const { getAIOrPrompt } = useAIWithFallback();
@@ -149,12 +174,36 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
         }
     };
 
-    const handleTargetDateChange = (newDate: string) => {
+    const handleTargetDateChange = async (newDate: string) => {
         setTargetDate(newDate);
         if (suggestedDate) {
             setSuggestedDate(''); // Clear suggestion if user manually picks a date
         }
+
+        // Run feasibility check if we have tasks
+        if (tasks.length > 0 && newDate) {
+            const totalMinutes = tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
+            const result = await assessTargetDateFeasibility(
+                totalMinutes,
+                newDate,
+                existingGoal?.id
+            );
+            setFeasibility(result);
+            setShowFeasibilityWarning(!result.isFeasible);
+        }
     };
+
+    // Auto-suggest target date when tasks change
+    useEffect(() => {
+        const autoSuggestDate = async () => {
+            if (tasks.length > 0 && !targetDate && !suggestedDate && step === 'review') {
+                const totalMinutes = tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
+                const suggested = await suggestTargetDate(totalMinutes, existingGoal?.id);
+                setSuggestedDate(suggested);
+            }
+        };
+        autoSuggestDate();
+    }, [tasks, targetDate, suggestedDate, step, existingGoal]);
 
     const handleSave = async () => {
         if (tasks.length === 0) {
@@ -162,25 +211,61 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
             return;
         }
 
+        // Check feasibility if target date is set
+        if ((targetDate || suggestedDate) && !isLifelong) {
+            const totalMinutes = tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
+            const result = await assessTargetDateFeasibility(
+                totalMinutes,
+                targetDate || suggestedDate || '',
+                existingGoal?.id
+            );
+
+            if (!result.isFeasible) {
+                setFeasibility(result);
+                setShowFeasibilityWarning(true);
+                return; // Don't save until user accepts suggested date or reduces scope
+            }
+        }
+
         setStep('saving');
 
         try {
-            // Create goal
-            const goal = await goalsDB.create({
-                content: goalText.trim(),
-                targetDate: targetDate || suggestedDate || undefined,
-                estimatedTargetDate: suggestedDate || undefined,
-                lifelong: isLifelong,
-                status: 'active',
-            });
+            let goalId: string;
 
-            // Create tasks
+            if (isEditMode && existingGoal) {
+                // Update existing goal
+                await goalsDB.update(existingGoal.id, {
+                    content: goalText.trim(),
+                    targetDate: targetDate || suggestedDate || undefined,
+                    estimatedTargetDate: suggestedDate || undefined,
+                    lifelong: isLifelong,
+                });
+                goalId = existingGoal.id;
+
+                // Delete all existing tasks for this goal
+                const existingTasks = await tasksDB.getByGoalId(goalId);
+                for (const task of existingTasks) {
+                    await tasksDB.delete(task.id);
+                }
+            } else {
+                // Create new goal
+                const goal = await goalsDB.create({
+                    content: goalText.trim(),
+                    targetDate: targetDate || suggestedDate || undefined,
+                    estimatedTargetDate: suggestedDate || undefined,
+                    lifelong: isLifelong,
+                    status: 'active',
+                });
+                goalId = goal.id;
+            }
+
+            // Create tasks (for both new and edited goals)
             for (let i = 0; i < tasks.length; i++) {
                 const t = tasks[i];
                 if (!t.content.trim()) continue;
 
                 await tasksDB.create({
-                    goalId: goal.id,
+                    goalId: goalId,
                     content: t.content.trim(),
                     category: t.category,
                     estimatedTotalMinutes: t.estimatedMinutes,
@@ -191,6 +276,19 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
                     order: i,
                     skipCount: 0,
                 });
+            }
+
+            // Trigger daily plan reassessment
+            await reassessDailyPlans();
+
+            // Check for workload overload
+            const workload = await assessTotalWorkload();
+            if (workload.isOverloaded && workload.message) {
+                setWorkloadWarning(workload.message);
+                // Don't block save, just show warning
+                setTimeout(() => {
+                    setWorkloadWarning(null);
+                }, 8000); // Clear after 8 seconds
             }
 
             onComplete?.();
@@ -385,9 +483,9 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
                                             onChange={(e) => handleUpdateTask(task.id, { estimatedMinutes: parseInt(e.target.value) })}
                                             className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-accent"
                                         >
-                                            <option value={7}>Light (~5-10 min)</option>
-                                            <option value={25}>Medium (~20-30 min)</option>
-                                            <option value={75}>Heavy (~60-90 min)</option>
+                                            <option value={7}>Warm-up (~5-10 min)</option>
+                                            <option value={25}>Settle (~20-30 min)</option>
+                                            <option value={75}>Dive (~60-90 min)</option>
                                         </select>
                                     </div>
                                 </div>
@@ -439,7 +537,7 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
                 </div>
 
                 {/* Target Date Editor */}
-                {(targetDate || suggestedDate) && (
+                {(targetDate || suggestedDate) && !showFeasibilityWarning && (
                     <div className="mt-4 p-3 bg-gray-50 rounded-xl">
                         <label className="block text-xs text-muted mb-2">Target date (optional)</label>
                         <input
@@ -451,6 +549,47 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
                     </div>
                 )}
 
+                {/* Feasibility Warning */}
+                {showFeasibilityWarning && feasibility && !feasibility.isFeasible && (
+                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                        <p className="text-sm text-foreground">{feasibility.message}</p>
+                        <p className="text-xs text-muted">
+                            Based on your current pace, this would need about {Math.round(feasibility.totalTaskMinutes / 60)} hours spread across {feasibility.daysAvailable} days.
+                        </p>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => {
+                                    if (feasibility.suggestedDate) {
+                                        setTargetDate(feasibility.suggestedDate);
+                                        setSuggestedDate('');
+                                        setShowFeasibilityWarning(false);
+                                        setFeasibility(null);
+                                    }
+                                }}
+                                className="px-4 py-2 bg-foreground text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
+                            >
+                                Accept suggested date ({feasibility.suggestedDate})
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowFeasibilityWarning(false);
+                                    setStep('review'); // Go back to review to edit tasks
+                                }}
+                                className="px-4 py-2 border-2 border-gray-200 text-foreground rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                            >
+                                Reduce scope
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Workload Warning */}
+                {workloadWarning && (
+                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <p className="text-sm text-foreground">{workloadWarning}</p>
+                    </div>
+                )}
+
                 {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
                 <div className="flex gap-3 mt-6">
@@ -458,7 +597,7 @@ export default function GoalCreator({ onComplete, onCancel }: GoalCreatorProps) 
                         onClick={handleSave}
                         className="px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 transition-opacity font-medium"
                     >
-                        Save Goal
+                        {isEditMode ? 'Update Goal' : 'Save Goal'}
                     </button>
                     <button
                         onClick={() => setStep('input')}

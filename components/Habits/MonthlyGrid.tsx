@@ -118,11 +118,6 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
                     <tr className="border-b border-border text-muted">
                         <th className="py-2 px-3 text-left font-normal w-12 bg-white">Date</th>
                         <th className="py-2 px-3 text-left font-normal max-w-[200px] bg-white">Small Moment</th>
-                        {habits.map(h => (
-                            <th key={h.id} className="py-2 px-3 text-center font-normal w-12 bg-white" title={h.content}>
-                                {h.content.slice(0, 8)}...
-                            </th>
-                        ))}
                     </tr>
                 </thead>
                 <tbody className="text-foreground">
@@ -144,30 +139,11 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
                                 <td className="py-3 px-3 text-gray-600 truncate max-w-[200px]" title={getMoment(date)}>
                                     {getMoment(date)}
                                 </td>
-                                {habits.map(h => {
-                                    const status = getHabitStatus(date, h.id);
-                                    let color = 'text-gray-300';
-                                    if (status === 'DONE') color = 'text-green-500 font-bold';
-                                    if (status === 'NOT_DONE') color = 'text-red-300';
-                                    if (status === 'PENDING') color = 'text-gray-300';
-
-                                    return (
-                                        <td key={h.id} className={`py-3 px-3 text-center ${color}`}>
-                                            {STATE_ICONS[status as keyof typeof STATE_ICONS] || status}
-                                        </td>
-                                    );
-                                })}
                             </tr>
                         );
                     })}
                 </tbody>
             </table>
-
-            {habits.length === 0 && (
-                <div className="text-center py-6 text-muted text-sm italic">
-                    No recurring habits yet.
-                </div>
-            )}
         </div>
     );
 }

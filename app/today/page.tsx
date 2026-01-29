@@ -25,14 +25,14 @@ interface DailyPlan {
     capacityNote?: string;
 }
 
+type PresetMode = 'gentle' | 'focused' | 'energetic' | 'recovery';
+
 export default function TodayPage() {
     const [plan, setPlan] = useState<DailyPlan | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-    const [timerMinutes, setTimerMinutes] = useState(0);
     const [showRemainingTasks, setShowRemainingTasks] = useState(false);
-    const [showDayTypePrompt, setShowDayTypePrompt] = useState(false);
-    const [dayTypeInput, setDayTypeInput] = useState('');
+    const [showPresetModal, setShowPresetModal] = useState(false);
+    const [selectedMode, setSelectedMode] = useState<PresetMode>('focused');
 
     const today = getLocalDateString();
     const displayDate = new Date().toLocaleDateString('en-US', {
@@ -62,22 +62,12 @@ export default function TodayPage() {
         await loadPlan();
     };
 
-    const handleStartTask = (taskId: string) => {
-        setActiveTaskId(taskId);
-        setTimerMinutes(0);
-    };
+    const handleCompleteTask = async (taskId: string) => {
+        const task = plan?.tasks.find(t => t.task.id === taskId)?.task;
+        if (!task) return;
 
-    const handleStopTask = async () => {
-        if (activeTaskId && timerMinutes > 0) {
-            await recordTaskProgress(activeTaskId, timerMinutes);
-            await loadPlan();
-        }
-        setActiveTaskId(null);
-        setTimerMinutes(0);
-    };
-
-    const handleQuickProgress = async (taskId: string, minutes: number) => {
-        await recordTaskProgress(taskId, minutes);
+        // Mark task as complete by setting completed minutes to total
+        await recordTaskProgress(taskId, task.estimatedTotalMinutes - task.completedMinutes);
         await loadPlan();
     };
 
@@ -89,24 +79,27 @@ export default function TodayPage() {
         setPlan({ ...plan, tasks: newTasks });
     };
 
-    const handleGenerateNewPlan = async () => {
-        // Use AI to generate new plan based on user input
+    const handleRegenerateWithMode = async () => {
         setLoading(true);
         try {
-            // For now, just regenerate with balanced type
-            // TODO: Integrate AI to parse dayTypeInput and determine day type
-            const dayType = dayTypeInput.toLowerCase().includes('easy') || dayTypeInput.toLowerCase().includes('gentle')
-                ? 'gentle'
-                : dayTypeInput.toLowerCase().includes('focus') || dayTypeInput.toLowerCase().includes('productive')
-                    ? 'focused'
-                    : 'balanced';
-
-            const newPlan = await regenerateDailyPlan(today, dayType);
+            const newPlan = await regenerateDailyPlan(today, selectedMode);
             setPlan(newPlan);
-            setShowDayTypePrompt(false);
-            setDayTypeInput('');
+            setShowPresetModal(false);
         } catch (error) {
             console.error('Failed to regenerate plan:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handlePullMoreTasks = async () => {
+        // Pull additional tasks from upcoming by regenerating with energetic mode
+        setLoading(true);
+        try {
+            const newPlan = await regenerateDailyPlan(today, 'energetic');
+            setPlan(newPlan);
+        } catch (error) {
+            console.error('Failed to pull more tasks:', error);
         } finally {
             setLoading(false);
         }
@@ -134,6 +127,11 @@ export default function TodayPage() {
     const otherTasks = remainingTasks.filter(({ task }) => !task.isRecurring).slice(3);
     const habits = remainingTasks.filter(({ task }) => task.isRecurring);
 
+    // Check if all visible goal tasks are done (excluding habits)
+    const goalTasks = plan?.tasks.filter((t) => !t.task.isRecurring) || [];
+    const allGoalTasksDone = goalTasks.length > 0 && goalTasks.every((t) => isTaskEffectivelyComplete(t.task));
+    const canPullMore = allGoalTasksDone && goalTasks.length < 10; // Don't pull if already have many tasks
+
     return (
         <div className="max-w-2xl mx-auto px-6 py-8 animate-fadeIn">
             {/* Minimal Header */}
@@ -147,9 +145,9 @@ export default function TodayPage() {
             </header>
 
             {/* Regenerate Plan Button */}
-            {!showDayTypePrompt && remainingTasks.length > 0 && (
+            {!showPresetModal && remainingTasks.length > 0 && (
                 <button
-                    onClick={() => setShowDayTypePrompt(true)}
+                    onClick={() => setShowPresetModal(true)}
                     className="mb-6 text-sm text-muted hover:text-foreground transition-colors flex items-center gap-2"
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -159,32 +157,69 @@ export default function TodayPage() {
                 </button>
             )}
 
-            {/* Day Type Prompt */}
-            {showDayTypePrompt && (
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl animate-fadeIn">
-                    <p className="text-sm text-blue-900 mb-3 font-medium">What kind of day does this need to be?</p>
-                    <input
-                        type="text"
-                        value={dayTypeInput}
-                        onChange={(e) => setDayTypeInput(e.target.value)}
-                        placeholder="e.g., 'Easy and relaxed' or 'Productive and focused'"
-                        className="w-full px-3 py-2 rounded-lg border border-blue-200 focus:border-blue-400 focus:outline-none text-sm mb-3"
-                        autoFocus
-                    />
+            {/* Preset Mode Selection */}
+            {showPresetModal && (
+                <div className="mb-6 p-5 bg-gray-50 border border-gray-200 rounded-xl animate-fadeIn space-y-4">
+                    <p className="text-sm text-foreground font-medium">Choose your day mode</p>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            onClick={() => setSelectedMode('gentle')}
+                            className={`p-4 rounded-lg border-2 text-left transition-all ${selectedMode === 'gentle'
+                                ? 'border-accent bg-accent/5'
+                                : 'border-gray-200 hover:border-gray-300 bg-white'
+                                }`}
+                        >
+                            <div className="text-base mb-1">🌱 Gentle</div>
+                            <div className="text-xs text-muted">Light tasks only</div>
+                        </button>
+
+                        <button
+                            onClick={() => setSelectedMode('focused')}
+                            className={`p-4 rounded-lg border-2 text-left transition-all ${selectedMode === 'focused'
+                                ? 'border-accent bg-accent/5'
+                                : 'border-gray-200 hover:border-gray-300 bg-white'
+                                }`}
+                        >
+                            <div className="text-base mb-1">🎯 Focused</div>
+                            <div className="text-xs text-muted">Balanced flow</div>
+                        </button>
+
+                        <button
+                            onClick={() => setSelectedMode('energetic')}
+                            className={`p-4 rounded-lg border-2 text-left transition-all ${selectedMode === 'energetic'
+                                ? 'border-accent bg-accent/5'
+                                : 'border-gray-200 hover:border-gray-300 bg-white'
+                                }`}
+                        >
+                            <div className="text-base mb-1">🔥 Energetic</div>
+                            <div className="text-xs text-muted">Extra capacity</div>
+                        </button>
+
+                        <button
+                            onClick={() => setSelectedMode('recovery')}
+                            className={`p-4 rounded-lg border-2 text-left transition-all ${selectedMode === 'recovery'
+                                ? 'border-accent bg-accent/5'
+                                : 'border-gray-200 hover:border-gray-300 bg-white'
+                                }`}
+                        >
+                            <div className="text-base mb-1">🧘 Recovery</div>
+                            <div className="text-xs text-muted">Essentials only</div>
+                        </button>
+                    </div>
                     <div className="flex gap-2">
                         <button
-                            onClick={handleGenerateNewPlan}
-                            disabled={!dayTypeInput.trim()}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm font-medium"
+                            onClick={handleRegenerateWithMode}
+                            className="px-5 py-2.5 bg-foreground text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
                         >
-                            Generate new plan
+                            Regenerate today's plan
                         </button>
                         <button
                             onClick={() => {
-                                setShowDayTypePrompt(false);
-                                setDayTypeInput('');
+                                setShowPresetModal(false);
+                                setSelectedMode('focused');
                             }}
-                            className="px-4 py-2 text-blue-700 hover:bg-blue-100 rounded-lg transition-colors text-sm"
+                            className="px-4 py-2 text-muted hover:text-foreground rounded-lg transition-colors text-sm"
                         >
                             Cancel
                         </button>
@@ -200,13 +235,8 @@ export default function TodayPage() {
                             key={task.id}
                             task={task}
                             goalName={goal.content}
-                            isActive={activeTaskId === task.id}
-                            onStart={() => handleStartTask(task.id)}
-                            onStop={handleStopTask}
+                            onComplete={() => handleCompleteTask(task.id)}
                             onSkip={() => handleSkipTask(task.id)}
-                            onQuickProgress={(mins) => handleQuickProgress(task.id, mins)}
-                            timerMinutes={timerMinutes}
-                            setTimerMinutes={setTimerMinutes}
                             onMoveUp={index > 0 ? () => handleReorderTasks(index, index - 1) : undefined}
                             onMoveDown={index < focusTasks.length - 1 ? () => handleReorderTasks(index, index + 1) : undefined}
                         />
@@ -245,13 +275,8 @@ export default function TodayPage() {
                                     key={task.id}
                                     task={task}
                                     goalName={goal.content}
-                                    isActive={activeTaskId === task.id}
-                                    onStart={() => handleStartTask(task.id)}
-                                    onStop={handleStopTask}
+                                    onComplete={() => handleCompleteTask(task.id)}
                                     onSkip={() => handleSkipTask(task.id)}
-                                    onQuickProgress={(mins) => handleQuickProgress(task.id, mins)}
-                                    timerMinutes={timerMinutes}
-                                    setTimerMinutes={setTimerMinutes}
                                     compact
                                 />
                             ))}
@@ -260,10 +285,24 @@ export default function TodayPage() {
                 </div>
             )}
 
+            {/* "I have time for more" feature */}
+            {canPullMore && !loading && (
+                <div className="mb-6 p-5 bg-green-50 border border-green-200 rounded-xl text-center animate-fadeIn">
+                    <p className="text-sm text-foreground mb-3">All tasks complete! 🎉</p>
+                    <button
+                        onClick={handlePullMoreTasks}
+                        className="px-5 py-2.5 bg-accent text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
+                    >
+                        I have time for more
+                    </button>
+                    <p className="text-xs text-muted mt-2">Pull next tasks if capacity allows</p>
+                </div>
+            )}
+
             {/* Habits Section */}
             {habits.length > 0 && (
                 <div className="mb-6">
-                    <h2 className="text-xs uppercase tracking-wider text-muted mb-3 font-medium">Daily Rhythm</h2>
+                    <h2 className="text-xs uppercase tracking-wider text-muted mb-3 font-medium">Habits</h2>
                     <div className="space-y-2">
                         {habits.map(({ task, goal }) => (
                             <div
@@ -271,7 +310,7 @@ export default function TodayPage() {
                                 className="flex items-center gap-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg hover:bg-indigo-50 transition-colors"
                             >
                                 <button
-                                    onClick={() => handleQuickProgress(task.id, task.estimatedTotalMinutes)}
+                                    onClick={() => handleCompleteTask(task.id)}
                                     className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-indigo-400 hover:bg-indigo-100 flex items-center justify-center transition-colors"
                                     title="Mark complete"
                                 >
@@ -315,13 +354,8 @@ export default function TodayPage() {
 interface TaskCardProps {
     task: Task;
     goalName: string;
-    isActive: boolean;
-    onStart: () => void;
-    onStop: () => void;
+    onComplete: () => void;
     onSkip: () => void;
-    onQuickProgress: (minutes: number) => void;
-    timerMinutes: number;
-    setTimerMinutes: (mins: number) => void;
     compact?: boolean;
     onMoveUp?: () => void;
     onMoveDown?: () => void;
@@ -330,24 +364,20 @@ interface TaskCardProps {
 function TaskCard({
     task,
     goalName,
-    isActive,
-    onStart,
-    onStop,
+    onComplete,
     onSkip,
-    onQuickProgress,
-    timerMinutes,
-    setTimerMinutes,
     compact = false,
     onMoveUp,
     onMoveDown,
 }: TaskCardProps) {
     const progress = getTaskProgressPercentage(task);
 
+    const isComplete = isTaskEffectivelyComplete(task);
+
     return (
         <div
-            className={`bg-white border rounded-xl transition-all group/card ${
-                isActive ? 'border-accent shadow-md' : 'border-gray-200 hover:border-gray-300'
-            } ${compact ? 'p-3' : 'p-4'}`}
+            className={`bg-white border rounded-xl transition-all group/card ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200 hover:border-gray-300'
+                } ${compact ? 'p-3' : 'p-4'}`}
         >
             {/* Header */}
             <div className="flex items-start justify-between mb-2">
@@ -358,9 +388,9 @@ function TaskCard({
                         </p>
                         <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
                             <span className="text-muted/60 inline-flex items-center mt-0.5">
-                                {task.effortLabel === 'light' && <EffortLightIcon />}
-                                {task.effortLabel === 'medium' && <EffortMediumIcon />}
-                                {task.effortLabel === 'heavy' && <EffortHeavyIcon />}
+                                {task.effortLabel === 'warm-up' && <EffortLightIcon />}
+                                {task.effortLabel === 'settle' && <EffortMediumIcon />}
+                                {task.effortLabel === 'dive' && <EffortHeavyIcon />}
                             </span>
                         </Tooltip>
                     </div>
@@ -409,55 +439,30 @@ function TaskCard({
             )}
 
             {/* Actions */}
-            {!compact && (
-                <>
-                    {isActive ? (
-                        <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => setTimerMinutes(Math.max(0, timerMinutes - 5))}
-                                    className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-muted transition-colors text-sm"
-                                >
-                                    −
-                                </button>
-                                <span className="w-14 text-center font-medium text-sm">{timerMinutes} min</span>
-                                <button
-                                    onClick={() => setTimerMinutes(timerMinutes + 5)}
-                                    className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-muted transition-colors text-sm"
-                                >
-                                    +
-                                </button>
-                            </div>
-                            <button
-                                onClick={onStop}
-                                className="ml-auto px-4 py-1.5 bg-foreground text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
-                            >
-                                Done
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={onStart}
-                                className="px-3 py-1.5 bg-accent/10 text-accent rounded-lg hover:bg-accent/20 transition-colors text-sm font-medium"
-                            >
-                                Start
-                            </button>
-                            <button
-                                onClick={() => onQuickProgress(10)}
-                                className="px-3 py-1.5 text-muted hover:text-foreground hover:bg-gray-50 rounded-lg transition-all text-sm"
-                            >
-                                +10 min
-                            </button>
-                            <button
-                                onClick={onSkip}
-                                className="ml-auto px-3 py-1.5 text-muted/60 hover:text-muted rounded-lg transition-colors text-sm"
-                            >
-                                Skip
-                            </button>
-                        </div>
-                    )}
-                </>
+            {!compact && !isComplete && (
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={onComplete}
+                        className="px-4 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
+                    >
+                        Done
+                    </button>
+                    <button
+                        onClick={onSkip}
+                        className="ml-auto px-3 py-1.5 text-muted/60 hover:text-muted rounded-lg transition-colors text-sm"
+                    >
+                        Skip Today
+                    </button>
+                </div>
+            )}
+
+            {isComplete && (
+                <div className="text-xs text-muted/60 flex items-center gap-1">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Completed
+                </div>
             )}
         </div>
     );

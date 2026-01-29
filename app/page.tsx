@@ -7,6 +7,7 @@ import MonthlyGrid from '@/components/Habits/MonthlyGrid';
 import { goalsDB, tasksDB } from '@/lib/db';
 import type { Goal, Task } from '@/lib/schema';
 import GoalCreator from '@/components/GoalCreator';
+import { reassessDailyPlans } from '@/lib/planning-engine';
 import { RecurringIcon, CheckIcon, EditIcon, CloseIcon, PlusIcon, EffortLightIcon, EffortMediumIcon, EffortHeavyIcon } from '@/components/icons';
 import Tooltip from '@/components/Tooltip';
 import EmptyState from '@/components/EmptyState';
@@ -17,43 +18,15 @@ const TaskItem = ({
     task,
     goalId,
     onComplete,
-    onToggleRepetitive,
-    onDrop,
-    onEdit
 }: {
     task: Task,
     goalId: string,
     onComplete: () => void,
-    onToggleRepetitive: () => void,
-    onDrop: () => void,
-    onEdit: (newContent: string) => void
 }) => {
-    const [isEditing, setIsEditing] = useState(false);
-    const [editContent, setEditContent] = useState(task.content);
-
     const isComplete = isTaskEffectivelyComplete(task);
 
-    const handleSave = () => {
-        if (editContent.trim() && editContent !== task.content) {
-            onEdit(editContent);
-        }
-        setIsEditing(false);
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') handleSave();
-        if (e.key === 'Escape') {
-            setEditContent(task.content);
-            setIsEditing(false);
-        }
-    };
-
-    useEffect(() => {
-        setEditContent(task.content);
-    }, [task.content]);
-
     return (
-        <div className={`flex items-start gap-3 p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 group/task ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
+        <div className={`flex items-start gap-3 p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
             <button
                 onClick={onComplete}
                 className={`flex-shrink-0 w-5 h-5 mt-0.5 rounded-md border-2 flex items-center justify-center transition-colors ${isComplete
@@ -68,62 +41,26 @@ const TaskItem = ({
             <div className="flex-1 min-w-0 flex flex-col gap-1">
                 <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                        {isEditing ? (
-                            <input
-                                autoFocus
-                                value={editContent}
-                                onChange={(e) => setEditContent(e.target.value)}
-                                onBlur={handleSave}
-                                onKeyDown={handleKeyDown}
-                                className="w-full text-foreground font-medium bg-gray-50 border border-accent/20 rounded px-1 -ml-1 focus:outline-none focus:ring-1 focus:ring-accent"
-                            />
-                        ) : (
-                            <div className="flex items-start gap-2">
-                                <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'line-through text-muted' : ''}`}>
-                                    {task.content}
-                                </p>
-                                <div className="flex items-center gap-1 flex-shrink-0 mt-1">
-                                    {/* Effort Indicator */}
-                                    <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
-                                        <span className="text-muted/60 inline-flex items-center">
-                                            {task.effortLabel === 'light' && <EffortLightIcon />}
-                                            {task.effortLabel === 'medium' && <EffortMediumIcon />}
-                                            {task.effortLabel === 'heavy' && <EffortHeavyIcon />}
-                                        </span>
-                                    </Tooltip>
-                                    {/* Target Date removed from TaskItem as it belongs to Goal now */}
-                                    {task.isRecurring && (
-                                        <span className="text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center" title="Daily recurring">
-                                            <RecurringIcon size={11} />
-                                        </span>
-                                    )}
-                                </div>
+                        <div className="flex items-start gap-2">
+                            <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'line-through text-muted' : ''}`}>
+                                {task.content}
+                            </p>
+                            <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+                                {/* Effort Indicator */}
+                                <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
+                                    <span className="text-muted/60 inline-flex items-center">
+                                        {task.effortLabel === 'warm-up' && <EffortLightIcon />}
+                                        {task.effortLabel === 'settle' && <EffortMediumIcon />}
+                                        {task.effortLabel === 'dive' && <EffortHeavyIcon />}
+                                    </span>
+                                </Tooltip>
+                                {task.isRecurring && (
+                                    <span className="text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center" title="Daily recurring">
+                                        <RecurringIcon size={11} />
+                                    </span>
+                                )}
                             </div>
-                        )}
-                    </div>
-
-                    <div className="flex items-center gap-1 opacity-0 group-hover/task:opacity-100 transition-opacity self-start">
-                        <button
-                            onClick={() => setIsEditing(!isEditing)}
-                            className="p-1.5 text-gray-400 hover:text-accent hover:bg-gray-50 rounded-lg transition-colors"
-                            title="Edit text"
-                        >
-                            <EditIcon />
-                        </button>
-                        <button
-                            onClick={onToggleRepetitive}
-                            className={`p-1.5 rounded-lg transition-colors ${task.isRecurring ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-500 hover:bg-gray-50'}`}
-                            title={task.isRecurring ? "Stop repeating" : "Make daily habit"}
-                        >
-                            <RecurringIcon size={13} />
-                        </button>
-                        <button
-                            onClick={onDrop}
-                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Drop task"
-                        >
-                            <CloseIcon />
-                        </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -139,6 +76,7 @@ export default function HomePage() {
     const [goals, setGoals] = useState<GoalWithTasks[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreator, setShowCreator] = useState(false);
+    const [editingGoal, setEditingGoal] = useState<GoalWithTasks | null>(null);
 
     // Habit Tracker State
     const [view, setView] = useState<'GOALS' | 'HABITS'>('GOALS');
@@ -201,6 +139,7 @@ export default function HomePage() {
 
     const handleGoalCreatorComplete = () => {
         setShowCreator(false);
+        setEditingGoal(null);
         loadGoals();
     };
 
@@ -221,39 +160,15 @@ export default function HomePage() {
                 console.log('Daily goal completed and reset for tomorrow');
             }
 
+            // Trigger daily plan reassessment
+            await reassessDailyPlans();
+
             await loadGoals();
         } catch (error) {
             console.error('Error completing task:', error);
         }
     };
 
-    const handleToggleRepetitive = async (taskId: string, currentStatus: boolean) => {
-        try {
-            await tasksDB.update(taskId, { isRecurring: !currentStatus });
-            await loadGoals();
-        } catch (error) {
-            console.error('Error toggling repetitive:', error);
-        }
-    };
-
-    const handleDropTask = async (taskId: string, taskContent: string) => {
-        if (!confirm(`Archive "${taskContent}"? You can restore it later if needed.`)) return;
-        try {
-            await tasksDB.archive(taskId);
-            await loadGoals();
-        } catch (error) {
-            console.error('Error archiving task:', error);
-        }
-    };
-
-    const handleEditTask = async (taskId: string, newContent: string) => {
-        try {
-            await tasksDB.update(taskId, { content: newContent });
-            await loadGoals();
-        } catch (error) {
-            console.error('Error editing task:', error);
-        }
-    };
 
     const handleDeleteGoal = async (goalId: string, goalContent: string) => {
         if (!confirm(`Delete "${goalContent}" and all its tasks?`)) return;
@@ -263,6 +178,10 @@ export default function HomePage() {
             await Promise.all(goalTasks.map(t => tasksDB.delete(t.id)));
             // Delete goal
             await goalsDB.delete(goalId);
+
+            // Trigger daily plan reassessment
+            await reassessDailyPlans();
+
             await loadGoals();
         } catch (error) {
             console.error('Error deleting goal:', error);
@@ -366,7 +285,22 @@ export default function HomePage() {
                         <div className="mb-12 max-w-2xl mx-auto">
                             <GoalCreator
                                 onComplete={handleGoalCreatorComplete}
-                                onCancel={() => setShowCreator(false)}
+                                onCancel={() => {
+                                    setShowCreator(false);
+                                    setEditingGoal(null);
+                                }}
+                                existingGoal={editingGoal ? {
+                                    id: editingGoal.id,
+                                    content: editingGoal.content,
+                                    targetDate: editingGoal.targetDate,
+                                    lifelong: editingGoal.lifelong,
+                                    tasks: editingGoal.tasks.map(t => ({
+                                        id: t.id,
+                                        content: t.content,
+                                        estimatedMinutes: t.estimatedTotalMinutes,
+                                        isRecurring: t.isRecurring,
+                                    }))
+                                } : undefined}
                             />
                         </div>
                     )}
@@ -486,6 +420,17 @@ export default function HomePage() {
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
+                                                                setEditingGoal(goal);
+                                                                setShowCreator(true);
+                                                            }}
+                                                            className="text-gray-400 hover:text-accent hover:bg-gray-50 px-3 py-2 rounded transition-colors text-sm font-medium"
+                                                            title="Edit goal"
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
                                                                 handleDeleteGoal(goal.id, goal.content);
                                                             }}
                                                             className="text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors text-sm font-medium"
@@ -508,9 +453,6 @@ export default function HomePage() {
                                                                     task={task}
                                                                     goalId={goal.id}
                                                                     onComplete={() => handleCompleteTask(task.id, false, task.estimatedTotalMinutes)}
-                                                                    onToggleRepetitive={() => handleToggleRepetitive(task.id, task.isRecurring)}
-                                                                    onDrop={() => handleDropTask(task.id, task.content)}
-                                                                    onEdit={(newContent) => handleEditTask(task.id, newContent)}
                                                                 />
                                                             ))}
                                                         </div>

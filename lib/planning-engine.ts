@@ -18,13 +18,19 @@ import {
 const DEFAULT_DAILY_UNITS = 3;
 const MIN_DAILY_UNITS = 2;
 const MAX_DAILY_UNITS = 5;
-const MAX_HEAVY_PER_DAY = 1;
+const MAX_DIVE_PER_DAY = 1;
+
+// Default daily capacity if no history (240 minutes = 4 hours)
+const DEFAULT_DAILY_MINUTES = 240;
+
+// Max daily workload warning threshold (5 hours)
+const MAX_DAILY_WORKLOAD_MINUTES = 300;
 
 // Effort unit weights for capacity calculation
 const EFFORT_WEIGHTS = {
-    light: 1,
-    medium: 2,
-    heavy: 4,
+    'warm-up': 1,
+    'settle': 2,
+    'dive': 4,
 } as const;
 
 // ============================================
@@ -37,7 +43,31 @@ interface AllocatedTask {
     effortUnits: number;
 }
 
-type DayType = 'gentle' | 'balanced' | 'focused';
+type DayType = 'gentle' | 'balanced' | 'focused' | 'energetic' | 'recovery';
+
+// Preset mode configuration
+const PRESET_MODES = {
+    gentle: {
+        capacityMultiplier: 0.6,
+        description: 'Only high-priority + low-effort tasks',
+    },
+    focused: {
+        capacityMultiplier: 1.0,
+        description: 'Normal priority-based selection',
+    },
+    energetic: {
+        capacityMultiplier: 1.2,
+        description: 'Allow stretch tasks + pull from upcoming',
+    },
+    recovery: {
+        capacityMultiplier: 0.4,
+        description: 'Maintenance + essentials only',
+    },
+    balanced: {
+        capacityMultiplier: 1.0,
+        description: 'Balanced day (default)',
+    },
+} as const;
 
 interface DailyPlan {
     date: string;
@@ -184,8 +214,9 @@ function calculateTaskWeight(task: Task, goal: Goal): number {
 /**
  * Select tasks for today from all active goals
  * Balances across goals and respects effort limits
+ * Applies mode-specific filtering rules
  */
-async function selectTasksForDate(date: string, capacity: CapacityEstimate): Promise<AllocatedTask[]> {
+async function selectTasksForDate(date: string, capacity: CapacityEstimate, mode: DayType = 'balanced'): Promise<AllocatedTask[]> {
     const activeGoals = await goalsDB.getActive();
     const allTasks = await tasksDB.getAll();
 
@@ -221,24 +252,42 @@ async function selectTasksForDate(date: string, capacity: CapacityEstimate): Pro
         return true;
     });
 
+    // Apply mode-specific filtering
+    if (mode === 'gentle' || mode === 'recovery') {
+        // Only include high-priority AND low-effort tasks
+        eligibleTasks = eligibleTasks.filter(({ task }) => {
+            // High priority = top 50% of weights
+            const isHighPriority = true; // Already sorted, so top tasks are high priority
+            // Low effort = warm-up or settle only (no dive)
+            const isLowEffort = task.effortLabel === 'warm-up' || task.effortLabel === 'settle';
+            return isLowEffort;
+        });
+    } else if (mode === 'energetic') {
+        // Allow all tasks including stretch tasks (no filtering)
+        // Energetic mode uses higher capacity multiplier to pull more tasks
+    }
+
     // Sort by weight (descending)
     eligibleTasks.sort((a, b) => b.weight - a.weight);
 
     // Select tasks up to capacity
     const selected: AllocatedTask[] = [];
     let totalUnits = 0;
-    let heavyCount = 0;
+    let diveCount = 0;
 
     for (const { task, goal } of eligibleTasks) {
         const effortUnits = EFFORT_WEIGHTS[task.effortLabel];
 
         // Check limits
         if (totalUnits + effortUnits > capacity.dailyUnits) continue;
-        if (task.effortLabel === 'heavy' && heavyCount >= MAX_HEAVY_PER_DAY) continue;
+
+        // For recovery mode, be even more strict with dive tasks
+        if (mode === 'recovery' && task.effortLabel === 'dive') continue;
+        if (task.effortLabel === 'dive' && diveCount >= MAX_DIVE_PER_DAY) continue;
 
         selected.push({ task, goal, effortUnits });
         totalUnits += effortUnits;
-        if (task.effortLabel === 'heavy') heavyCount++;
+        if (task.effortLabel === 'dive') diveCount++;
 
         // Stop if we've hit capacity
         if (totalUnits >= capacity.dailyUnits) break;
@@ -282,9 +331,17 @@ export async function generateDailyPlan(date: string = getLocalDateString(), day
         };
     }
 
-    // Generate new plan
-    const capacity = await estimateDailyCapacity();
-    const selectedTasks = await selectTasksForDate(date, capacity);
+    // Generate new plan with mode-specific capacity
+    const baseCapacity = await estimateDailyCapacity();
+
+    // Apply preset mode multiplier
+    const modeConfig = PRESET_MODES[dayType] || PRESET_MODES.balanced;
+    const adjustedCapacity = {
+        ...baseCapacity,
+        dailyUnits: Math.max(MIN_DAILY_UNITS, Math.min(MAX_DAILY_UNITS, Math.round(baseCapacity.dailyUnits * modeConfig.capacityMultiplier))),
+    };
+
+    const selectedTasks = await selectTasksForDate(date, adjustedCapacity, dayType);
 
     const totalUnits = selectedTasks.reduce((sum, t) => sum + t.effortUnits, 0);
     const totalMinutes = selectedTasks.reduce((sum, t) => sum + t.task.estimatedTotalMinutes, 0);
@@ -298,18 +355,8 @@ export async function generateDailyPlan(date: string = getLocalDateString(), day
     });
 
     let capacityNote: string | undefined;
-    // Adjust capacity based on selected day type
-    if (dayType === 'gentle') {
-        capacity.dailyUnits = Math.max(MIN_DAILY_UNITS, Math.floor(capacity.dailyUnits * 0.7));
-        capacityNote = "Gentle day: lighter load to keep things calm.";
-    } else if (dayType === 'focused') {
-        capacity.dailyUnits = Math.min(MAX_DAILY_UNITS, Math.ceil(capacity.dailyUnits * 1.3));
-        capacityNote = "Focused day: higher capacity for deep work.";
-    } else {
-        // balanced (default) – no adjustment
-        if (capacity.confidence === 'low') {
-            capacityNote = "We're still learning your rhythm. This is a gentle starting point.";
-        }
+    if (baseCapacity.confidence === 'low' && dayType === 'balanced') {
+        capacityNote = "We're still learning your rhythm. This is a gentle starting point.";
     }
 
     return {
@@ -417,9 +464,9 @@ export async function handleSkip(taskId: string, date: string = getLocalDateStri
     }
 
     // If task has been skipped many times, consider reducing effort estimate
-    if (task.skipCount >= 5 && task.effortLabel !== 'light') {
+    if (task.skipCount >= 5 && task.effortLabel !== 'warm-up') {
         // Reduce perceived effort - make it feel more doable
-        const newLabel = task.effortLabel === 'heavy' ? 'medium' : 'light';
+        const newLabel = task.effortLabel === 'dive' ? 'settle' : 'warm-up';
         await tasksDB.update(taskId, { effortLabel: newLabel });
     }
 
@@ -458,9 +505,15 @@ export async function regenerateDailyPlan(date: string = getLocalDateString(), d
     // Delete existing allocation
     const existing = await dailyAllocationsDB.getByDate(date);
     if (existing) {
-        // We can't delete from IndexedDB easily, so we'll just overwrite
-        const capacity = await estimateDailyCapacity();
-        const selectedTasks = await selectTasksForDate(date, capacity);
+        // Apply preset mode multiplier
+        const baseCapacity = await estimateDailyCapacity();
+        const modeConfig = PRESET_MODES[dayType] || PRESET_MODES.balanced;
+        const adjustedCapacity = {
+            ...baseCapacity,
+            dailyUnits: Math.max(MIN_DAILY_UNITS, Math.min(MAX_DAILY_UNITS, Math.round(baseCapacity.dailyUnits * modeConfig.capacityMultiplier))),
+        };
+
+        const selectedTasks = await selectTasksForDate(date, adjustedCapacity, dayType);
 
         const totalUnits = selectedTasks.reduce((sum, t) => sum + t.effortUnits, 0);
 
@@ -480,5 +533,253 @@ export async function regenerateDailyPlan(date: string = getLocalDateString(), d
         };
     }
 
-    return generateDailyPlan(date);
+    return generateDailyPlan(date, dayType);
+}
+
+// ============================================
+// Auto-Reassessment
+// ============================================
+
+/**
+ * Trigger reassessment of daily plans when goals change
+ * Regenerates today + future dates, but preserves manual reordering for today
+ */
+export async function reassessDailyPlans(): Promise<void> {
+    const today = getLocalDateString();
+    const todayAllocation = await dailyAllocationsDB.getByDate(today);
+
+    // Get today's current task order (preserve manual reordering)
+    const todayTaskOrder = todayAllocation?.taskIds || [];
+
+    // Regenerate today's plan
+    await regenerateDailyPlan(today);
+
+    // If user had manually reordered tasks today, restore that order
+    if (todayTaskOrder.length > 0 && todayAllocation) {
+        const newAllocation = await dailyAllocationsDB.getByDate(today);
+        if (newAllocation) {
+            // Merge: keep manually ordered tasks at their positions, add new tasks at end
+            const newTaskIds = newAllocation.taskIds;
+            const orderedIds: string[] = [];
+            const usedIds = new Set<string>();
+
+            // First, add tasks that were in the old order (if they still exist)
+            for (const id of todayTaskOrder) {
+                if (newTaskIds.includes(id)) {
+                    orderedIds.push(id);
+                    usedIds.add(id);
+                }
+            }
+
+            // Then add any new tasks that weren't in the old order
+            for (const id of newTaskIds) {
+                if (!usedIds.has(id)) {
+                    orderedIds.push(id);
+                }
+            }
+
+            await dailyAllocationsDB.update(today, { taskIds: orderedIds });
+        }
+    }
+
+    // For future dates, just clear allocations so they regenerate naturally
+    // (Don't pre-generate future dates, let them generate on-demand)
+}
+
+// ============================================
+// Target Date Feasibility Assessment
+// ============================================
+
+export interface FeasibilityResult {
+    isFeasible: boolean;
+    suggestedDate?: string;
+    message?: string;
+    dailyCapacityMinutes: number;
+    totalTaskMinutes: number;
+    daysNeeded: number;
+    daysAvailable: number;
+}
+
+/**
+ * Assess if a target date is realistic given:
+ * - Total task time estimate
+ * - User's daily capacity (from history or default)
+ * - Existing goals and habits
+ */
+export async function assessTargetDateFeasibility(
+    totalTaskMinutes: number,
+    targetDate: string,
+    excludeGoalId?: string // When editing, exclude the goal being edited
+): Promise<FeasibilityResult> {
+    const today = new Date();
+    const target = new Date(targetDate);
+
+    // Calculate days available
+    const daysAvailable = Math.max(1, Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+
+    // Get user's daily capacity
+    const capacity = await estimateDailyCapacity();
+    const dailyCapacityMinutes = capacity.confidence === 'low'
+        ? DEFAULT_DAILY_MINUTES
+        : capacity.averageMinutes;
+
+    // Calculate existing workload from other active goals
+    const allGoals = await goalsDB.getActive();
+    const allTasks = await tasksDB.getAll();
+
+    let existingDailyMinutes = 0;
+    for (const goal of allGoals) {
+        if (excludeGoalId && goal.id === excludeGoalId) continue;
+
+        const goalTasks = allTasks.filter(t =>
+            t.goalId === goal.id && !isTaskEffectivelyComplete(t)
+        );
+
+        // Estimate daily allocation for this goal
+        const totalGoalMinutes = goalTasks.reduce((sum, t) =>
+            sum + (t.estimatedTotalMinutes - t.completedMinutes), 0
+        );
+
+        if (goal.targetDate) {
+            const goalTarget = new Date(goal.targetDate);
+            const goalDaysAvailable = Math.max(1, Math.ceil((goalTarget.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+            existingDailyMinutes += totalGoalMinutes / goalDaysAvailable;
+        } else {
+            // No target date, assume spread across 30 days
+            existingDailyMinutes += totalGoalMinutes / 30;
+        }
+    }
+
+    // Available capacity for this new goal
+    const availableCapacity = Math.max(0, dailyCapacityMinutes - existingDailyMinutes);
+
+    // Days needed to complete the new goal
+    const daysNeeded = availableCapacity > 0
+        ? Math.ceil(totalTaskMinutes / availableCapacity)
+        : Infinity;
+
+    // Check feasibility
+    if (daysNeeded <= daysAvailable) {
+        return {
+            isFeasible: true,
+            dailyCapacityMinutes,
+            totalTaskMinutes,
+            daysNeeded,
+            daysAvailable,
+        };
+    }
+
+    // Not feasible - suggest a realistic date
+    const suggestedDaysNeeded = Math.ceil(daysNeeded * 1.1); // Add 10% buffer
+    const suggestedDate = new Date(today);
+    suggestedDate.setDate(suggestedDate.getDate() + suggestedDaysNeeded);
+
+    return {
+        isFeasible: false,
+        suggestedDate: suggestedDate.toISOString().split('T')[0],
+        message: `Given your current pace and existing goals, this timeline may be too tight. We can stretch it to make this sustainable.`,
+        dailyCapacityMinutes,
+        totalTaskMinutes,
+        daysNeeded,
+        daysAvailable,
+    };
+}
+
+/**
+ * Suggest a realistic target date based on task estimates and capacity
+ */
+export async function suggestTargetDate(
+    totalTaskMinutes: number,
+    excludeGoalId?: string
+): Promise<string> {
+    const today = new Date();
+
+    // Get capacity
+    const capacity = await estimateDailyCapacity();
+    const dailyCapacityMinutes = capacity.confidence === 'low'
+        ? DEFAULT_DAILY_MINUTES
+        : capacity.averageMinutes;
+
+    // Calculate existing workload
+    const allGoals = await goalsDB.getActive();
+    const allTasks = await tasksDB.getAll();
+
+    let existingDailyMinutes = 0;
+    for (const goal of allGoals) {
+        if (excludeGoalId && goal.id === excludeGoalId) continue;
+
+        const goalTasks = allTasks.filter(t =>
+            t.goalId === goal.id && !isTaskEffectivelyComplete(t)
+        );
+
+        const totalGoalMinutes = goalTasks.reduce((sum, t) =>
+            sum + (t.estimatedTotalMinutes - t.completedMinutes), 0
+        );
+
+        if (goal.targetDate) {
+            const goalTarget = new Date(goal.targetDate);
+            const goalDaysAvailable = Math.max(1, Math.ceil((goalTarget.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+            existingDailyMinutes += totalGoalMinutes / goalDaysAvailable;
+        } else {
+            existingDailyMinutes += totalGoalMinutes / 30;
+        }
+    }
+
+    const availableCapacity = Math.max(dailyCapacityMinutes * 0.5, dailyCapacityMinutes - existingDailyMinutes);
+    const daysNeeded = Math.ceil(totalTaskMinutes / availableCapacity);
+
+    // Add 20% buffer for realism
+    const bufferedDays = Math.ceil(daysNeeded * 1.2);
+
+    const suggestedDate = new Date(today);
+    suggestedDate.setDate(suggestedDate.getDate() + bufferedDays);
+
+    return suggestedDate.toISOString().split('T')[0];
+}
+
+/**
+ * Check if total daily workload across all goals exceeds healthy limit
+ */
+export async function assessTotalWorkload(): Promise<{
+    isOverloaded: boolean;
+    totalDailyMinutes: number;
+    message?: string;
+}> {
+    const allGoals = await goalsDB.getActive();
+    const allTasks = await tasksDB.getAll();
+    const today = new Date();
+
+    let totalDailyMinutes = 0;
+
+    for (const goal of allGoals) {
+        const goalTasks = allTasks.filter(t =>
+            t.goalId === goal.id && !isTaskEffectivelyComplete(t)
+        );
+
+        const totalGoalMinutes = goalTasks.reduce((sum, t) =>
+            sum + (t.estimatedTotalMinutes - t.completedMinutes), 0
+        );
+
+        if (goal.targetDate) {
+            const goalTarget = new Date(goal.targetDate);
+            const daysAvailable = Math.max(1, Math.ceil((goalTarget.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+            totalDailyMinutes += totalGoalMinutes / daysAvailable;
+        } else {
+            // Lifelong/no date goals - estimate as spread across 30 days
+            totalDailyMinutes += totalGoalMinutes / 30;
+        }
+    }
+
+    if (totalDailyMinutes > MAX_DAILY_WORKLOAD_MINUTES) {
+        return {
+            isOverloaded: true,
+            totalDailyMinutes,
+            message: `Your current goals add up to about ${Math.round(totalDailyMinutes / 60)} hours of work per day. Consider extending some timelines or reducing scope to keep things sustainable.`,
+        };
+    }
+
+    return {
+        isOverloaded: false,
+        totalDailyMinutes,
+    };
 }
