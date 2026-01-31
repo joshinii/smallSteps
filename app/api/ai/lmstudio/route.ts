@@ -1,23 +1,32 @@
-// SmallSteps OpenAI API Route
-// Server-side proxy for OpenAI API calls to avoid exposing API keys in browser
+// SmallSteps LM Studio API Route
+// Server-side proxy for LM Studio (local OpenAI-compatible server)
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+// LM Studio runs on localhost:1234 by default
+const LM_STUDIO_BASE_URL = process.env.LM_STUDIO_URL || 'http://localhost:1234/v1';
 
 export async function POST(request: NextRequest) {
     try {
-        const { apiKey, action, payload } = await request.json();
+        const { action, payload } = await request.json();
 
-        // Use provided API key or fall back to environment variable for local development
-        const effectiveApiKey = apiKey || process.env.OPENAI_API_KEY;
+        // Connect to local LM Studio server (no API key needed)
+        const client = new OpenAI({
+            baseURL: LM_STUDIO_BASE_URL,
+            apiKey: 'lm-studio', // LM Studio ignores this but OpenAI SDK requires it
+        });
 
-        if (!effectiveApiKey) {
-            return NextResponse.json({ error: 'API key required' }, { status: 400 });
+        // Get the loaded model name from LM Studio
+        let modelName = 'local-model';
+        try {
+            const models = await client.models.list();
+            if (models.data && models.data.length > 0) {
+                modelName = models.data[0].id;
+            }
+        } catch {
+            // Use default if model list fails
         }
-
-        const client = new OpenAI({ apiKey: effectiveApiKey });
 
         switch (action) {
             case 'decomposeGoal': {
@@ -26,31 +35,35 @@ export async function POST(request: NextRequest) {
                     ? `\nTarget completion: ${new Date(targetDate).toLocaleDateString()}`
                     : '';
 
-                const prompt = `You are a helper breaking a goal into ACTUAL WORK.
+                const prompt = `You are a calm, thoughtful planner helping someone achieve their goal gently.
+
 Goal: "${goalText}"${targetDateContext}
 
-**PROCESS:**
-1. List steps.
-2. Refine: If task > 60m → Break down OR Make Recurring.
-3. Finalize: Actionable tasks only.
+Break this down into small, manageable tasks. For each task:
+1. Keep it specific but achievable
+2. Estimate time honestly (most tasks should be 10-30 minutes)  
+3. Mark daily habits as recurring
+4. Include a brief rationale for your approach
 
-**STRICT RULES:**
-- MAX DURATION: 60 mins non-recurring.
-- NO FLUFF: No "Track progress", "Celebrate".
-- QUANTITY: "Read 5 books" → "Read Book 1" (Recur).
-- TOTAL EFFORT: Estimate *entire* volume.
+**Guidelines:**
+- Think holistically about what's needed
+- Prefer small steps over overwhelming chunks
+- Create 4-8 tasks, not more
+- Be realistic about time estimates
 
 **Output Format (JSON only):**
 {
-  "rationale": "Explanation",
-  "totalEstimatedMinutes": 3000,
+  "rationale": "Brief, encouraging explanation",
   "tasks": [
-    { "content": "Read Book 1", "estimatedMinutes": 45, "isRecurring": true }
+    { "content": "Specific action", "category": "category", "estimatedMinutes": 15, "isRecurring": false },
+    { "content": "Daily habit", "category": "health", "estimatedMinutes": 10, "isRecurring": true }
   ]
-}`;
+}
+
+Return ONLY valid JSON.`;
 
                 const response = await client.chat.completions.create({
-                    model: DEFAULT_MODEL,
+                    model: modelName,
                     messages: [{ role: 'user', content: prompt }],
                     temperature: 0.7,
                     max_tokens: 2048,
@@ -74,7 +87,7 @@ Respond with JSON only:
 }`;
 
                 const response = await client.chat.completions.create({
-                    model: DEFAULT_MODEL,
+                    model: modelName,
                     messages: [{ role: 'user', content: prompt }],
                     temperature: 0.3,
                     max_tokens: 256,
@@ -100,7 +113,7 @@ Respond with JSON only:
 }`;
 
                 const response = await client.chat.completions.create({
-                    model: DEFAULT_MODEL,
+                    model: modelName,
                     messages: [{ role: 'user', content: prompt }],
                     temperature: 0.3,
                     max_tokens: 512,
@@ -114,9 +127,18 @@ Respond with JSON only:
                 return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
         }
     } catch (error: any) {
-        console.error('OpenAI API error:', error);
+        console.error('LM Studio API error:', error);
+
+        // Provide helpful error messages
+        if (error.code === 'ECONNREFUSED') {
+            return NextResponse.json(
+                { error: 'Cannot connect to LM Studio. Make sure the server is running on localhost:1234.' },
+                { status: 503 }
+            );
+        }
+
         return NextResponse.json(
-            { error: error.message || 'Internal server error' },
+            { error: error.message || 'LM Studio error' },
             { status: 500 }
         );
     }

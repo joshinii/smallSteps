@@ -12,6 +12,16 @@ export class GeminiAdapter implements AIProvider {
         this.apiKey = apiKey;
     }
 
+    async validateApiKey(): Promise<boolean> {
+        try {
+            await this.callAPI('estimateTaskEffort', { taskContent: 'test' });
+            return true;
+        } catch (error) {
+            console.warn('Gemini API key validation failed:', error);
+            return false;
+        }
+    }
+
     private async callAPI(action: string, payload: any): Promise<string> {
         const response = await fetch('/api/ai/gemini', {
             method: 'POST',

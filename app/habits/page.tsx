@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import HabitMatrix from '@/components/Habits/HabitMatrix';
-import { getLocalDate } from '@/lib/schema';
+import { getLocalDate } from '@/lib/utils';
 import HabitManager from '@/components/Habits/HabitManager';
 
 // Helper: Get start of week (Sunday) for a given date

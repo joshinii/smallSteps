@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite';
 
 export async function POST(request: NextRequest) {
     try {
@@ -30,35 +30,35 @@ export async function POST(request: NextRequest) {
 
         switch (action) {
             case 'decomposeGoal': {
-                const { goalText, targetDate } = payload;
-                const targetDateContext = targetDate
-                    ? `\nTarget completion: ${new Date(targetDate).toLocaleDateString()}`
-                    : '';
+                const { goalText } = payload;
 
-                const prompt = `You are a calm, thoughtful planner helping someone achieve their goal gently.
+                const prompt = `You are an expert planner breaking a goal into PHASED EFFORT RESERVOIRS.
 
-Goal: "${goalText}"${targetDateContext}
+Goal: "${goalText}"
 
-Break this down into small, manageable tasks. For each task:
-1. Keep it specific but achievable
-2. Estimate time honestly (most tasks should be 10-30 minutes)  
-3. Mark daily habits as recurring
-4. Include a brief rationale for your approach
+**PHILOSOPHY:**
+We do NOT use daily habits or small tasks.
+We use "Reservoirs" - huge buckets of effort (e.g. 50 hours) that the user drains over months.
 
-**Guidelines:**
-- Think holistically about what's needed
-- Prefer small steps over overwhelming chunks
-- Create 4-8 tasks, not more
-- Be realistic about time estimates
+**PROCESS:**
+1. **Analyze Scale**: If this is a big goal (e.g. "Learn Language", "Get Fit"), it needs HUGE reservoirs.
+2. **Create Phases**: Break it into 3-5 distinct phases (e.g. "Phase 1: Foundations", "Phase 2: Practice").
+3. **Estimate Volume**: Assign realistic time blocks based on goal difficulty (e.g. 500 mins for simple, 5000+ mins for mastery).
+
+**STRICT RULES:**
+- **NO FREQUENCY**: Forbidden words: "daily", "weekly", "habit", "every day".
+- **NO SMALL TASKS**: Minimum reservoir size is 300 minutes.
+- **NO DATES**: Do not suggest target dates.
+- **PHASED NAMES**: Use names like "Phase 1: [Topic]", "Deep Dive: [Topic]".
 
 **Output Format (JSON only):**
 {
-  "rationale": "Brief, encouraging explanation",
+  "rationale": "Breaking this into 4 major effort phases...",
+  "suggestedTargetDate": null, 
   "tasks": [
-    { "content": "Specific action", "category": "category", "estimatedMinutes": 15, "isRecurring": false },
-    { "content": "Daily habit", "category": "health", "estimatedMinutes": 10, "isRecurring": true }
-  ],
-  "suggestedTargetDate": "YYYY-MM-DD"
+    { "content": "Phase 1: Core Concepts", "estimatedMinutes": 4500, "isRecurring": false, "category": "learning" },
+    { "content": "Phase 2: Advanced Application", "estimatedMinutes": 6000, "isRecurring": false, "category": "practice" }
+  ]
 }
 
 Return ONLY valid JSON.`;

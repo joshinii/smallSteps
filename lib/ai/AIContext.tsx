@@ -4,7 +4,7 @@
 // React context for managing AI provider state across the app
 
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
-import { ProviderName, setApiKey, hasApiKey, clearApiKey, getProvider, PROVIDER_INFO, loadPersistedKeys } from '@/lib/ai';
+import { ProviderName, setApiKey, hasApiKey, clearApiKey, getProvider, PROVIDER_INFO, loadPersistedKeys, CLOUD_PROVIDERS, isLocalProvider } from '@/lib/ai';
 import type { AIProvider } from '@/lib/ai/ai-provider';
 import { manualProvider } from '@/lib/ai/ai-provider';
 
@@ -18,6 +18,7 @@ interface AIContextType {
     showSetupModal: boolean;
     openSetupModal: () => void;
     closeSetupModal: () => void;
+    removeKey: (name: ProviderName) => void;
 }
 
 const AIContext = createContext<AIContextType | null>(null);
@@ -30,8 +31,8 @@ export function AIContextProvider({ children }: { children: ReactNode }) {
     // Load persisted API keys on mount
     useEffect(() => {
         loadPersistedKeys();
-        // Check if any provider has a key after loading
-        const providers: ProviderName[] = ['claude', 'gemini', 'openai'];
+        // Check if any provider has a key after loading (lmstudio stores 'local' marker)
+        const providers: ProviderName[] = ['lmstudio', 'claude', 'gemini', 'openai'];
         for (const p of providers) {
             if (hasApiKey(p)) {
                 setProviderState(p);
@@ -77,6 +78,21 @@ export function AIContextProvider({ children }: { children: ReactNode }) {
                 showSetupModal,
                 openSetupModal,
                 closeSetupModal,
+                removeKey: (name: ProviderName) => {
+                    clearApiKey(name);
+                    // If removing current provider, fallback to manual or another
+                    if (name === provider) {
+                        const remaining = [...CLOUD_PROVIDERS, 'lmstudio' as ProviderName].filter(p => p !== name && hasApiKey(p));
+                        if (remaining.length > 0) {
+                            setProvider(remaining[0]);
+                        } else {
+                            setProvider('manual');
+                        }
+                    } else {
+                        // Force re-render of configured state
+                        setProvider(provider);
+                    }
+                },
             }}
         >
             {children}

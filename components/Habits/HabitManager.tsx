@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { goalsDB, tasksDB, dailyAllocationsDB } from '@/lib/db';
-import { generateId, minutesToEffortLabel } from '@/lib/schema';
+import { generateId, minutesToEffortLabel } from '@/lib/utils';
 import type { Task, Goal } from '@/lib/schema';
 
 interface HabitManagerProps {
@@ -48,6 +48,7 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
                 habitGoal = await goalsDB.create({
                     content: 'Daily Habits',
                     status: 'active',
+                    lifelong: true,
                     // No target date for general habits
                 });
             }
@@ -59,7 +60,7 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
                 category: newType, // Store type in category
                 estimatedTotalMinutes: 20, // Default duration
                 completedMinutes: 0,
-                effortLabel: 'medium', // Default
+                effortLabel: 'settle', // Default
                 isRecurring: true,
                 order: habits.length,
                 skipCount: 0

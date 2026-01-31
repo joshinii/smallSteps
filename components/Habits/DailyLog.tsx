@@ -1,10 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { parseLocalDate } from '@/lib/utils';
+import { parseLocalDate, getLocalDateString } from '@/lib/utils';
 import { dailyMomentsDB } from '@/lib/db';
 import { useAIWithFallback } from '@/lib/ai/AIContext';
-import { getLocalDateString } from '@/lib/schema';
 
 interface DailyLogProps {
     date: string; // YYYY-MM-DD

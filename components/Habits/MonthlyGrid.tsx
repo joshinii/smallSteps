@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { dailyMomentsDB, tasksDB, taskProgressDB } from '@/lib/db';
 import type { Task, TaskProgress } from '@/lib/schema';
-import { getLocalDateString } from '@/lib/schema';
+import { getLocalDateString } from '@/lib/utils';
 
 const STATE_ICONS = {
     DONE: '✓',

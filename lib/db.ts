@@ -7,13 +7,18 @@ import {
     DailyAllocation,
     TaskProgress,
     DailyMoment,
+    RecurringTaskHistory,
     AISettings,
+    TaskQueueEntry,
+    EffortLevel,
+} from './schema';
+import {
     generateId,
     getISOTimestamp,
-} from './schema';
+} from './utils';
 
 const DB_NAME = 'smallsteps-db';
-const DB_VERSION = 1;
+const DB_VERSION = 3; // Incremented for taskQueue store
 
 // ============================================
 // Database Initialization
@@ -73,6 +78,22 @@ export async function getDB(): Promise<IDBDatabase> {
             // AI settings store (singleton)
             if (!db.objectStoreNames.contains('settings')) {
                 db.createObjectStore('settings', { keyPath: 'id' });
+            }
+
+            // Recurring task history store
+            if (!db.objectStoreNames.contains('recurringTaskHistory')) {
+                const historyStore = db.createObjectStore('recurringTaskHistory', { keyPath: 'id' });
+                historyStore.createIndex('taskId', 'taskId', { unique: false });
+                historyStore.createIndex('goalId', 'goalId', { unique: false });
+                historyStore.createIndex('date', 'date', { unique: false });
+                historyStore.createIndex('taskId_date', ['taskId', 'date'], { unique: true });
+            }
+
+            // Task queue store (for persistent scheduling)
+            if (!db.objectStoreNames.contains('taskQueue')) {
+                const queueStore = db.createObjectStore('taskQueue', { keyPath: 'taskId' });
+                queueStore.createIndex('goalId', 'goalId', { unique: false });
+                queueStore.createIndex('effortLevel', 'effortLevel', { unique: false });
             }
         };
     });
@@ -216,9 +237,10 @@ export const goalsDB = {
             }
             return { completed: true, isDaily: true };
         } else {
-            // One-time goal: Mark as completed
+            // One-time goal: Mark as drained (formerly completed)
+            // In pure effort flow, we don't "finish", we "drain".
             await this.update(goalId, {
-                status: 'completed',
+                status: 'drained' as any, // Cast to any to allow new status if TS complains, or update Schema type above
                 completedAt: getISOTimestamp(),
             });
             return { completed: true, isDaily: false };
@@ -459,12 +481,235 @@ export const aiSettingsDB = {
 };
 
 // ============================================
+// Recurring Task History CRUD
+// ============================================
+
+export const recurringTaskHistoryDB = {
+    async getByTaskId(taskId: string): Promise<RecurringTaskHistory[]> {
+        return getByIndex<RecurringTaskHistory>('recurringTaskHistory', 'taskId', taskId);
+    },
+
+    async getByGoalId(goalId: string): Promise<RecurringTaskHistory[]> {
+        return getByIndex<RecurringTaskHistory>('recurringTaskHistory', 'goalId', goalId);
+    },
+
+    async getByDate(date: string): Promise<RecurringTaskHistory[]> {
+        return getByIndex<RecurringTaskHistory>('recurringTaskHistory', 'date', date);
+    },
+
+    async getByTaskAndDate(taskId: string, date: string): Promise<RecurringTaskHistory | undefined> {
+        const db = await getDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction('recurringTaskHistory', 'readonly');
+            const store = tx.objectStore('recurringTaskHistory');
+            const index = store.index('taskId_date');
+            const request = index.get([taskId, date]);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    },
+
+    async record(
+        taskId: string,
+        goalId: string,
+        date: string,
+        completed: boolean,
+        minutes: number,
+        skipped: boolean = false
+    ): Promise<RecurringTaskHistory> {
+        // Check if history already exists for this task+date
+        const existing = await this.getByTaskAndDate(taskId, date);
+
+        if (existing) {
+            // Update existing history
+            const updated: RecurringTaskHistory = {
+                ...existing,
+                completed,
+                completedMinutes: minutes,
+                skipped,
+            };
+            return put('recurringTaskHistory', updated);
+        }
+
+        // Create new history entry
+        const history: RecurringTaskHistory = {
+            id: generateId(),
+            taskId,
+            goalId,
+            date,
+            completed,
+            completedMinutes: minutes,
+            skipped,
+            createdAt: getISOTimestamp(),
+        };
+
+        return put('recurringTaskHistory', history);
+    },
+
+    /**
+     * Get current streak for a task (consecutive days completed)
+     */
+    async getStreak(taskId: string): Promise<number> {
+        const allHistory = await this.getByTaskId(taskId);
+        if (allHistory.length === 0) return 0;
+
+        // Sort by date descending
+        const sorted = allHistory.sort((a, b) => b.date.localeCompare(a.date));
+
+        let streak = 0;
+        const currentDate = new Date();
+
+        for (const entry of sorted) {
+            // Check if this is the expected date (today or previous consecutive day)
+            const expectedDate = new Date(currentDate);
+            expectedDate.setDate(expectedDate.getDate() - streak);
+
+            const expectedDateStr = expectedDate.toISOString().split('T')[0];
+
+            if (entry.date !== expectedDateStr) break;
+            if (!entry.completed) break;
+
+            streak++;
+        }
+
+        return streak;
+    },
+
+    /**
+     * Get completion rate for last N days
+     */
+    async getCompletionRate(taskId: string, days: number = 7): Promise<number> {
+        const allHistory = await this.getByTaskId(taskId);
+        if (allHistory.length === 0) return 0;
+
+        const today = new Date();
+        const cutoffDate = new Date(today);
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+
+        const recentHistory = allHistory.filter(h => {
+            const entryDate = new Date(h.date);
+            return entryDate >= cutoffDate && entryDate <= today;
+        });
+
+        if (recentHistory.length === 0) return 0;
+
+        const completedCount = recentHistory.filter(h => h.completed).length;
+        return (completedCount / recentHistory.length) * 100;
+    },
+};
+
+// ============================================
+// Task Queue CRUD (Internal Scheduling)
+// ============================================
+
+export const taskQueueDB = {
+    /**
+     * Get all queue entries
+     */
+    async getAll(): Promise<TaskQueueEntry[]> {
+        return getAll<TaskQueueEntry>('taskQueue');
+    },
+
+    /**
+     * Get a queue entry by task ID
+     */
+    async getByTaskId(taskId: string): Promise<TaskQueueEntry | undefined> {
+        return getById<TaskQueueEntry>('taskQueue', taskId);
+    },
+
+    /**
+     * Get all queue entries for a goal
+     */
+    async getByGoalId(goalId: string): Promise<TaskQueueEntry[]> {
+        return getByIndex<TaskQueueEntry>('taskQueue', 'goalId', goalId);
+    },
+
+    /**
+     * Get all queue entries by effort level
+     */
+    async getByEffortLevel(level: EffortLevel): Promise<TaskQueueEntry[]> {
+        return getByIndex<TaskQueueEntry>('taskQueue', 'effortLevel', level);
+    },
+
+    /**
+     * Add or update a queue entry
+     */
+    async upsert(entry: TaskQueueEntry): Promise<TaskQueueEntry> {
+        const now = getISOTimestamp();
+        const existing = await this.getByTaskId(entry.taskId);
+
+        if (existing) {
+            const updated: TaskQueueEntry = {
+                ...existing,
+                ...entry,
+                updatedAt: now,
+            };
+            return put<TaskQueueEntry>('taskQueue', updated);
+        }
+
+        const newEntry: TaskQueueEntry = {
+            ...entry,
+            createdAt: now,
+            updatedAt: now,
+        };
+        return put<TaskQueueEntry>('taskQueue', newEntry);
+    },
+
+    /**
+     * Remove a task from the queue
+     */
+    async remove(taskId: string): Promise<void> {
+        return deleteById('taskQueue', taskId);
+    },
+
+    /**
+     * Remove all queue entries for a goal
+     */
+    async removeByGoalId(goalId: string): Promise<void> {
+        const entries = await this.getByGoalId(goalId);
+        for (const entry of entries) {
+            await this.remove(entry.taskId);
+        }
+    },
+
+    /**
+     * Clear entire queue (for rehydration)
+     */
+    async clear(): Promise<void> {
+        const db = await getDB();
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction('taskQueue', 'readwrite');
+            const store = tx.objectStore('taskQueue');
+            const request = store.clear();
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    },
+
+    /**
+     * Increment waiting days for all queued tasks (call once per day)
+     */
+    async incrementWaitingDays(): Promise<void> {
+        const all = await this.getAll();
+        const now = getISOTimestamp();
+
+        for (const entry of all) {
+            await put<TaskQueueEntry>('taskQueue', {
+                ...entry,
+                waitingDays: entry.waitingDays + 1,
+                updatedAt: now,
+            });
+        }
+    },
+};
+
+// ============================================
 // Utility: Clear All Data (Dev Only)
 // ============================================
 
 export async function clearAllData(): Promise<void> {
     const db = await getDB();
-    const storeNames = ['goals', 'tasks', 'dailyAllocations', 'taskProgress', 'dailyMoments', 'settings'];
+    const storeNames = ['goals', 'tasks', 'dailyAllocations', 'taskProgress', 'dailyMoments', 'settings', 'recurringTaskHistory', 'taskQueue'];
 
     for (const storeName of storeNames) {
         await new Promise<void>((resolve, reject) => {

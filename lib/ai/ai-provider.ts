@@ -12,7 +12,7 @@ export interface TaskSuggestion {
 export interface GoalPlan {
     rationale: string;
     tasks: TaskSuggestion[];
-    suggestedTargetDate?: string;
+    totalEstimatedMinutes?: number; // Total effort for the entire goal (e.g. 1800 for reading 3 books)
 }
 
 export interface EffortEstimate {
@@ -52,6 +52,11 @@ export interface AIProvider {
      * Identify which tasks should be recurring (daily habits)
      */
     identifyRecurringTasks(tasks: string[]): Promise<RecurringSuggestion[]>;
+
+    /**
+     * Validate the API key (check connection/auth)
+     */
+    validateApiKey(): Promise<boolean>;
 }
 
 /**
@@ -62,6 +67,10 @@ export class ManualProvider implements AIProvider {
     readonly name = 'manual';
     readonly displayName = 'Continue Manually';
 
+    async validateApiKey(): Promise<boolean> {
+        return true;
+    }
+
     async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean): Promise<GoalPlan> {
         return {
             rationale: 'Breaking this down into manageable steps.',
@@ -69,17 +78,17 @@ export class ManualProvider implements AIProvider {
                 {
                     content: `Start working on: ${goalText}`,
                     estimatedMinutes: 30,
-                    isRecurring: false,
+                    isRecurring: !!isLifelong,
                 },
                 {
                     content: 'Make incremental progress',
                     estimatedMinutes: 25,
-                    isRecurring: true,
+                    isRecurring: !!isLifelong,
                 },
                 {
                     content: 'Review and adjust approach',
                     estimatedMinutes: 15,
-                    isRecurring: false,
+                    isRecurring: !!isLifelong,
                 },
             ],
         };

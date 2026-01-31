@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { goalsDB, tasksDB } from '@/lib/db';
 import type { Goal, Task } from '@/lib/schema';
-import { isTaskEffectivelyComplete } from '@/lib/schema';
+import { isTaskEffectivelyComplete } from '@/lib/utils';
 import { CheckIcon } from '@/components/icons';
 
 interface JourneyGoal extends Goal {
@@ -123,9 +123,9 @@ export default function JourneyPage() {
                 <div className="text-center py-20 border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
                     <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-                            <line x1="12" y1="22.08" x2="12" y2="12"/>
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                            <line x1="12" y1="22.08" x2="12" y2="12" />
                         </svg>
                     </div>
                     <p className="text-lg text-muted font-light mb-2">Your journey starts here</p>
@@ -142,7 +142,7 @@ export default function JourneyPage() {
                                 month: 'short',
                                 day: 'numeric',
                                 year: 'numeric'
-                              })
+                            })
                             : null;
 
                         return (

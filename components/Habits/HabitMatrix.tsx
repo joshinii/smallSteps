@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, Fragment } from 'react';
-import { getLocalDate } from '@/lib/schema';
+import { getLocalDate } from '@/lib/utils';
 import { goalsDB, tasksDB, taskProgressDB, dailyMomentsDB } from '@/lib/db';
 import type { Task } from '@/lib/schema';
 
@@ -253,43 +253,23 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
             if (next === 'DONE') {
                 const task = await tasksDB.getById(itemId);
                 const duration = task?.estimatedTotalMinutes || 20;
-                await taskProgressDB.record(itemId, dateFull, duration);
-            } else if (next === 'SKIPPED') {
-                // We don't really support "SKIPPED" in progressDB schema cleanly yet?
-                // Or we can record 0 minutes? 
-                // Wait, Record(0) might imply started?
-                // Actually, let's look at schema. TaskProgress { minutesWorked: number }.
-                // If I want to verify "SKIPPED", I might need a separate way or just ignore it for now.
-                // The user added "SKIPPED".
-                // In the DB migration, I didn't add "status" field to progress.
-                // For now, let's just DELETE progress if SKIPPED (treat as not done) 
-                // OR we can simulate it?
-                // Since I cannot change schema easily right now without checking file.
-                // I will treat SKIPPED as "No Progress" in DB for now (delete record), 
-                // ensuring UI optimistic state handles the visual "Skipped".
-                // WARN: IF refresh, it will disappear.
-                // To support persisted SKIP, I should add a record with 0 minutes and maybe a meta field?
-                // But `taskProgressDB.record` takes minutes.
-                // Let's treat SKIPPED as effectively undone in DB for this hotfix.
-                // Or I'll save it as 0 minutes?
-                // But in `fetchData`, 0 minutes -> undefined.
-                // So "SKIPPED" is ephemeral in this implementation unless I change schema.
-                // I will accept this limitation to fix the crash first.
 
-                // If current was DONE, we want to remove the progress.
-                // "Skipped" is visually distinct but logically "Not Done" in simplified DB.
-                // Actually, to remove the "DONE" status from DB:
-                // `record` with 0 minutes might not overwrite if not careful? 
-                // `taskProgressDB` doesn't have a specific `delete`.
-                // But `record` usually adds/updates.
-                // If I record 0, `fetchData` logic `if (p.minutesWorked > 0)` returns undefined.
-                // So `DONE` -> `SKIPPED` (visual) -> Refreshes to Empty.
-                // That's acceptable for "Not Done".
+                // Use centralized helper
+                const { completeHabit } = await import('@/lib/planning-engine');
+                await completeHabit(itemId, duration, dateFull);
 
-                await taskProgressDB.record(itemId, dateFull, 0); // effectively clears 'DONE'
             } else {
-                // Clear
-                await taskProgressDB.record(itemId, dateFull, 0);
+                // If SKIPPED or CLEARED, we treat it as undoing the DONE state for now
+                // "SKIPPED" needs more work to be persisted differently, but for now 
+                // preventing "DONE" state persistence is key.
+                const { uncompleteHabit } = await import('@/lib/planning-engine');
+                await uncompleteHabit(itemId, dateFull);
+
+                // If it was supposed to be skipped, we might want to record a skip?
+                // But uncompleteHabit clears progress. 
+                // Skipped is a visual state in this Matrix that toggles: None -> Done -> Skipped -> None
+                // If we want to persist SKIPPED, we need a way to distinguishable valid progress (0 mins?)
+                // But for now, uncompleteHabit ensures it's NOT Done in Today page.
             }
         } catch (error) {
             console.error('Toggle failed', error);
@@ -405,10 +385,10 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
                                     <div className="max-w-xs mx-auto">
                                         <div className="w-16 h-16 bg-accent/10 text-accent rounded-full flex items-center justify-center mx-auto mb-4">
                                             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <circle cx="12" cy="12" r="10"/>
-                                                <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
-                                                <line x1="9" y1="9" x2="9.01" y2="9"/>
-                                                <line x1="15" y1="9" x2="15.01" y2="9"/>
+                                                <circle cx="12" cy="12" r="10" />
+                                                <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                                                <line x1="9" y1="9" x2="9.01" y2="9" />
+                                                <line x1="15" y1="9" x2="15.01" y2="9" />
                                             </svg>
                                         </div>
                                         <h3 className="text-lg font-light text-foreground mb-2">No habits yet</h3>

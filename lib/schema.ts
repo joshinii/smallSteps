@@ -9,11 +9,17 @@ export interface Goal {
     id: string;
     content: string;
     clarifiedContent?: string;
-    targetDate?: string; // YYYY-MM-DD, optional
-    estimatedTargetDate?: string; // AI-suggested if user doesn't provide
+    targetDate?: string; // Internal pressure weight only. NOT a deadline.
+    estimatedTargetDate?: string; // AI-suggested for internal calculations
     lifelong?: boolean; // true for ongoing goals (daily habits)
-    status: 'active' | 'paused' | 'completed';
-    completedAt?: string; // When all tasks were completed
+    status: 'active' | 'paused' | 'drained'; // 'drained' replaces 'completed' for effort flow
+    completedAt?: string; // When all effort was drained
+
+    // Recurring goal progress tracking
+    totalRecurringDaysTarget?: number; // For recurring goals: how many days to complete (e.g., "30 days of exercise")
+    completedRecurringDays?: number; // How many days have been completed
+    recurringProgressPercent?: number; // Calculated: completedDays / targetDays * 100
+
     createdAt: string;
     updatedAt: string;
 }
@@ -25,9 +31,10 @@ export interface Task {
     category?: string; // exercise, nutrition, learning, etc.
     frequency?: 'daily' | 'weekdays' | 'weekends' | 'weekly' | string;
 
-    // Time-based progress model (internal)
-    estimatedTotalMinutes: number;
-    completedMinutes: number;
+    // Effort Reservoir Model
+    // Task is a bucket of time. It is "done" when empty.
+    estimatedTotalMinutes: number; // Total volume of the reservoir
+    completedMinutes: number; // Amount drained so far
 
     // User-facing effort label
     effortLabel: 'warm-up' | 'settle' | 'dive';
@@ -50,7 +57,7 @@ export interface DailyAllocation {
     date: string; // YYYY-MM-DD
     taskIds: string[];
     estimatedLoad: number; // Total effort units for the day
-    dayType?: 'gentle' | 'balanced' | 'focused';
+    dayType?: 'gentle' | 'balanced' | 'focused' | 'energetic' | 'recovery';
     completedAt?: string;
     createdAt: string;
 }
@@ -70,6 +77,17 @@ export interface DailyMoment {
     updatedAt: string;
 }
 
+export interface RecurringTaskHistory {
+    id: string;
+    taskId: string;
+    goalId: string;
+    date: string; // YYYY-MM-DD
+    completed: boolean; // true if task was completed that day
+    completedMinutes: number; // how much time was spent
+    skipped: boolean; // true if explicitly skipped
+    createdAt: string;
+}
+
 export interface AISettings {
     id: 'ai-settings'; // Singleton
     provider: 'claude' | 'gemini' | 'openai' | null;
@@ -80,81 +98,43 @@ export interface AISettings {
 }
 
 // ============================================
-// Effort Label Mapping (Internal Use)
-// ============================================
-
-export const EFFORT_MAPPING = {
-    'warm-up': { minMinutes: 5, maxMinutes: 10, avgMinutes: 7 },
-    'settle': { minMinutes: 20, maxMinutes: 30, avgMinutes: 25 },
-    'dive': { minMinutes: 60, maxMinutes: 90, avgMinutes: 75 },
-} as const;
-
-export function minutesToEffortLabel(minutes: number): Task['effortLabel'] {
-    if (minutes <= 15) return 'warm-up';
-    if (minutes <= 45) return 'settle';
-    return 'dive';
-}
-
-export function effortLabelToMinutes(label: Task['effortLabel']): number {
-    return EFFORT_MAPPING[label].avgMinutes;
-}
-
-// ============================================
-// Task Completion Logic
-// ============================================
-
-// Task is considered "complete" at ~85-90% of estimated time
-export const COMPLETION_THRESHOLD = 0.85;
-
-export function isTaskEffectivelyComplete(task: Task): boolean {
-    if (task.estimatedTotalMinutes === 0) return false;
-    return task.completedMinutes >= task.estimatedTotalMinutes * COMPLETION_THRESHOLD;
-}
-
-export function getTaskProgressPercentage(task: Task): number {
-    if (task.estimatedTotalMinutes === 0) return 0;
-    return Math.min(100, (task.completedMinutes / task.estimatedTotalMinutes) * 100);
-}
-
-// ============================================
-// ID Generation
-// ============================================
-
-export function generateId(): string {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 9)}`;
-}
-
-// ============================================
-// Date Utilities
+// Task Queue System (Internal)
 // ============================================
 
 /**
- * Returns the current date in YYYY-MM-DD format based on local time.
+ * Effort level for queue categorization
+ * Maps from effortLabel: warm-up → light, settle → medium, dive → heavy
  */
-export function getLocalDateString(date: Date = new Date()): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+export type EffortLevel = 'light' | 'medium' | 'heavy';
+
+/**
+ * Entry in the task queue system
+ * Used internally for scheduling, not exposed to user
+ */
+export interface TaskQueueEntry {
+    taskId: string;          // Primary key, references Task.id
+    goalId: string;          // For quick filtering when goal is edited/deleted
+    effortLevel: EffortLevel;
+
+    // Priority factors (all internal, not shown to user)
+    goalTargetDate?: string; // Earlier deadline = higher priority
+    skipCount: number;       // Tracks how often this task was skipped
+    lastSkippedAt?: string;  // When it was last skipped
+    queuedAt: string;        // When added to queue (ISO timestamp)
+    waitingDays: number;     // Days in queue - increases priority over time
+
+    createdAt: string;
+    updatedAt: string;
 }
 
 /**
- * Alias for backwards compatibility.
- * @deprecated Use getLocalDateString() instead
+ * Maps effortLabel to queue effort level
  */
-export function getLocalDate(): string {
-    return getLocalDateString();
-}
-
-/**
- * Parses a YYYY-MM-DD string into a Date object in local time (midnight).
- * Solves the issue where new Date("YYYY-MM-DD") uses UTC.
- */
-export function parseLocalDate(dateStr: string): Date {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day);
-}
-
-export function getISOTimestamp(): string {
-    return new Date().toISOString();
+export function effortLabelToLevel(label: Task['effortLabel']): EffortLevel {
+    switch (label) {
+        case 'warm-up': return 'light';
+        case 'settle': return 'medium';
+        case 'dive': return 'heavy';
+        default: return 'medium';
+    }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { getLocalDate, getLocalDateString, isTaskEffectivelyComplete } from '@/lib/schema';
+import { getLocalDate, getLocalDateString, isTaskEffectivelyComplete } from '@/lib/utils';
 import DailyLog from '@/components/Habits/DailyLog';
 import MonthlyGrid from '@/components/Habits/MonthlyGrid';
 import { goalsDB, tasksDB } from '@/lib/db';
@@ -24,43 +24,33 @@ const TaskItem = ({
     onComplete: () => void,
 }) => {
     const isComplete = isTaskEffectivelyComplete(task);
+    const progress = (task.completedMinutes / (task.estimatedTotalMinutes || 1)) * 100;
 
     return (
-        <div className={`flex items-start gap-3 p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
-            <button
-                onClick={onComplete}
-                className={`flex-shrink-0 w-5 h-5 mt-0.5 rounded-md border-2 flex items-center justify-center transition-colors ${isComplete
-                    ? 'bg-accent border-accent text-white'
-                    : 'border-accent text-transparent hover:bg-accent/10'
-                    }`}
-                title={isComplete ? "Mark incomplete" : "Mark done"}
-            >
-                {isComplete && <CheckIcon />}
-            </button>
-
-            <div className="flex-1 min-w-0 flex flex-col gap-1">
-                <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-start gap-2">
-                            <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'line-through text-muted' : ''}`}>
-                                {task.content}
-                            </p>
-                            <div className="flex items-center gap-1 flex-shrink-0 mt-1">
-                                {/* Effort Indicator */}
-                                <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
-                                    <span className="text-muted/60 inline-flex items-center">
-                                        {task.effortLabel === 'warm-up' && <EffortLightIcon />}
-                                        {task.effortLabel === 'settle' && <EffortMediumIcon />}
-                                        {task.effortLabel === 'dive' && <EffortHeavyIcon />}
-                                    </span>
-                                </Tooltip>
-                                {task.isRecurring && (
-                                    <span className="text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center" title="Daily recurring">
-                                        <RecurringIcon size={11} />
-                                    </span>
-                                )}
-                            </div>
+        <div className={`p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
+            <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-2">
+                        <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'text-muted' : ''}`}>
+                            {task.content}
+                        </p>
+                        <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+                            {/* Effort Indicator */}
+                            <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
+                                <span className="text-muted/60 inline-flex items-center">
+                                    {task.effortLabel === 'warm-up' && <EffortLightIcon />}
+                                    {task.effortLabel === 'settle' && <EffortMediumIcon />}
+                                    {task.effortLabel === 'dive' && <EffortHeavyIcon />}
+                                </span>
+                            </Tooltip>
                         </div>
+                    </div>
+                    {/* Progress Bar */}
+                    <div className="mt-2 h-1 bg-gray-100 rounded-full overflow-hidden w-full max-w-[200px]">
+                        <div
+                            className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-green-400' : 'bg-accent'}`}
+                            style={{ width: `${Math.min(100, progress)}%` }}
+                        />
                     </div>
                 </div>
             </div>
@@ -282,26 +272,33 @@ export default function HomePage() {
                     )}
 
                     {showCreator && (
-                        <div className="mb-12 max-w-2xl mx-auto">
-                            <GoalCreator
-                                onComplete={handleGoalCreatorComplete}
-                                onCancel={() => {
-                                    setShowCreator(false);
-                                    setEditingGoal(null);
-                                }}
-                                existingGoal={editingGoal ? {
-                                    id: editingGoal.id,
-                                    content: editingGoal.content,
-                                    targetDate: editingGoal.targetDate,
-                                    lifelong: editingGoal.lifelong,
-                                    tasks: editingGoal.tasks.map(t => ({
-                                        id: t.id,
-                                        content: t.content,
-                                        estimatedMinutes: t.estimatedTotalMinutes,
-                                        isRecurring: t.isRecurring,
-                                    }))
-                                } : undefined}
-                            />
+                        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-start justify-center z-50 animate-fadeIn overflow-y-auto py-8">
+                            <div className="max-w-2xl w-full mx-4 animate-slideUp">
+                                <GoalCreator
+                                    onComplete={handleGoalCreatorComplete}
+                                    onCancel={() => {
+                                        setShowCreator(false);
+                                        setEditingGoal(null);
+                                    }}
+                                    onDelete={editingGoal ? () => {
+                                        handleDeleteGoal(editingGoal.id, editingGoal.content);
+                                        setShowCreator(false);
+                                        setEditingGoal(null);
+                                    } : undefined}
+                                    existingGoal={editingGoal ? {
+                                        id: editingGoal.id,
+                                        content: editingGoal.content,
+                                        targetDate: editingGoal.targetDate,
+                                        lifelong: editingGoal.lifelong,
+                                        tasks: editingGoal.tasks.map(t => ({
+                                            id: t.id,
+                                            content: t.content,
+                                            estimatedMinutes: t.estimatedTotalMinutes,
+                                            isRecurring: t.isRecurring,
+                                        }))
+                                    } : undefined}
+                                />
+                            </div>
                         </div>
                     )}
 
@@ -319,7 +316,7 @@ export default function HomePage() {
                                 {goals
                                     .filter(goal => {
                                         // Hide completed one-time goals (they move to Journey)
-                                        if (goal.status === 'completed') return false;
+                                        if (goal.status === 'drained') return false;
 
                                         // For daily goals (lifelong), hide if all tasks are complete today
                                         if (goal.lifelong) {
@@ -359,11 +356,14 @@ export default function HomePage() {
                                             >
                                                 {/* Goal Header */}
                                                 <div
-                                                    className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                                                    onClick={() => toggleGoalCollapse(goal.id)}
+                                                    className="p-4 hover:bg-gray-50 transition-colors"
                                                 >
                                                     <div className="flex items-start justify-between gap-4">
-                                                        <div className="flex-1">
+                                                        {/* Left side: Goal content (clickable to collapse/expand) */}
+                                                        <div
+                                                            className="flex-1 cursor-pointer"
+                                                            onClick={() => toggleGoalCollapse(goal.id)}
+                                                        >
                                                             <div className="flex items-center gap-3 mb-2">
                                                                 <h2 className="text-lg font-medium text-foreground">
                                                                     {goal.content}
@@ -390,12 +390,44 @@ export default function HomePage() {
                                                                     </span>
                                                                 </div>
                                                             )}
-
                                                         </div>
 
-                                                        <div className="flex items-center gap-2">
+                                                        {/* Right side: Action buttons */}
+                                                        <div className="flex items-center gap-1 flex-shrink-0">
                                                             <button
-                                                                className="text-muted/60 hover:text-foreground transition-transform duration-200 p-1"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleToggleGoalRepetitive(goal);
+                                                                }}
+                                                                className={`p-2 rounded transition-colors ${isGoalRepetitive ? 'text-indigo-600 bg-indigo-50' : 'text-gray-300 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                                                title="Toggle daily habits"
+                                                            >
+                                                                <RecurringIcon size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setEditingGoal(goal);
+                                                                    setShowCreator(true);
+                                                                }}
+                                                                className="text-gray-500 hover:text-accent hover:bg-accent/5 px-3 py-1.5 rounded transition-colors text-sm font-medium"
+                                                                title="Edit goal"
+                                                            >
+                                                                Edit
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleDeleteGoal(goal.id, goal.content);
+                                                                }}
+                                                                className="text-gray-500 hover:text-red-500 hover:bg-red-50 px-3 py-1.5 rounded transition-colors text-sm font-medium"
+                                                                title="Delete goal"
+                                                            >
+                                                                Drop
+                                                            </button>
+                                                            <button
+                                                                onClick={() => toggleGoalCollapse(goal.id)}
+                                                                className="text-muted/60 hover:text-foreground transition-transform duration-200 p-1 ml-1"
                                                                 style={{ transform: isGoalCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
                                                                 title={isGoalCollapsed ? 'Expand' : 'Collapse'}
                                                             >
@@ -404,40 +436,6 @@ export default function HomePage() {
                                                                 </svg>
                                                             </button>
                                                         </div>
-                                                    </div>
-
-                                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 right-4">
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleToggleGoalRepetitive(goal);
-                                                            }}
-                                                            className={`p-2 rounded transition-colors ${isGoalRepetitive ? 'text-indigo-600 bg-indigo-50' : 'text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                                                            title="Make all tasks daily habits"
-                                                        >
-                                                            <RecurringIcon size={14} />
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setEditingGoal(goal);
-                                                                setShowCreator(true);
-                                                            }}
-                                                            className="text-gray-400 hover:text-accent hover:bg-gray-50 px-3 py-2 rounded transition-colors text-sm font-medium"
-                                                            title="Edit goal"
-                                                        >
-                                                            Edit
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleDeleteGoal(goal.id, goal.content);
-                                                            }}
-                                                            className="text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors text-sm font-medium"
-                                                            title="Delete goal"
-                                                        >
-                                                            Drop
-                                                        </button>
                                                     </div>
                                                 </div>
 
@@ -452,7 +450,7 @@ export default function HomePage() {
                                                                     key={task.id}
                                                                     task={task}
                                                                     goalId={goal.id}
-                                                                    onComplete={() => handleCompleteTask(task.id, false, task.estimatedTotalMinutes)}
+                                                                    onComplete={() => { }} // Read-only in list view now
                                                                 />
                                                             ))}
                                                         </div>

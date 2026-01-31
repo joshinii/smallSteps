@@ -9,12 +9,12 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                background: "#FAFAF9",
-                foreground: "#1F2937",
-                accent: "#6366F1",
-                "accent-hover": "#4F46E5",
-                muted: "#9CA3AF",
-                border: "#E5E7EB",
+                background: "#FAF9F7",
+                foreground: "#2C2A27",
+                accent: "#7C6F5E",
+                "accent-hover": "#6A5F4F",
+                muted: "#9B8F80",
+                border: "#E8E4DF",
             },
             fontFamily: {
                 sans: [

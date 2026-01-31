@@ -6,8 +6,21 @@ import { manualProvider } from './ai-provider';
 import { ClaudeAdapter } from './claude-adapter';
 import { GeminiAdapter } from './gemini-adapter';
 import { OpenAIAdapter } from './openai-adapter';
+import { LMStudioAdapter } from './lmstudio-adapter';
 
-export type ProviderName = 'claude' | 'gemini' | 'openai' | 'manual';
+export type ProviderName = 'claude' | 'gemini' | 'openai' | 'lmstudio' | 'manual';
+
+/**
+ * Providers that don't require an API key (local or manual)
+ */
+export function isLocalProvider(provider: ProviderName): boolean {
+    return provider === 'manual' || provider === 'lmstudio';
+}
+
+/**
+ * Cloud providers that require API keys
+ */
+export const CLOUD_PROVIDERS: ProviderName[] = ['claude', 'gemini', 'openai'];
 
 // In-memory API key storage (session only by default)
 const apiKeys: Record<string, string> = {};
@@ -68,8 +81,15 @@ export function setStorageConsent(consent: boolean): void {
  * Load API keys from localStorage if consent given
  */
 export function loadPersistedKeys(): void {
-    if (!hasStorageConsent()) return;
     if (typeof window === 'undefined') return;
+
+    // Always load LM Studio marker (no consent needed for local config)
+    if (localStorage.getItem('smallsteps-lmstudio-configured') === 'true') {
+        apiKeys['lmstudio'] = 'local';
+    }
+
+    // Load cloud provider keys only if consent given
+    if (!hasStorageConsent()) return;
 
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -110,17 +130,29 @@ export function clearPersistedKeys(): void {
  * Store an API key in memory (and optionally persist if consent given)
  */
 export function setApiKey(provider: ProviderName, key: string): void {
-    if (provider !== 'manual') {
+    if (provider === 'manual') return;
+
+    // LM Studio doesn't need a key but we store a marker to indicate it's configured
+    if (provider === 'lmstudio') {
+        apiKeys[provider] = 'local';
+        // Always persist LM Studio since it's local and has no sensitive data
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('smallsteps-lmstudio-configured', 'true');
+        }
+    } else {
         apiKeys[provider] = key;
-        persistKeys(); // Persist if consent given
     }
+    persistKeys(); // Persist if consent given
 }
 
 /**
  * Check if an API key is available for a provider
  */
 export function hasApiKey(provider: ProviderName): boolean {
-    if (provider === 'manual') return true;
+    if (isLocalProvider(provider)) {
+        // For lmstudio, check if marker is set; manual always returns true
+        return provider === 'manual' || !!apiKeys[provider];
+    }
     return !!apiKeys[provider];
 }
 
@@ -129,6 +161,10 @@ export function hasApiKey(provider: ProviderName): boolean {
  */
 export function clearApiKey(provider: ProviderName): void {
     delete apiKeys[provider];
+    // Also clear LM Studio marker if clearing lmstudio
+    if (provider === 'lmstudio' && typeof window !== 'undefined') {
+        localStorage.removeItem('smallsteps-lmstudio-configured');
+    }
     persistKeys(); // Update persisted storage
 }
 
@@ -149,6 +185,12 @@ export function getProvider(providerName: ProviderName): AIProvider {
         return manualProvider;
     }
 
+    // LM Studio is local and doesn't need a key
+    if (providerName === 'lmstudio') {
+        return new LMStudioAdapter();
+    }
+
+    // Cloud providers require API keys
     const key = apiKeys[providerName];
     if (!key) {
         console.warn(`No API key for ${providerName}, falling back to manual provider`);
@@ -165,6 +207,37 @@ export function getProvider(providerName: ProviderName): AIProvider {
         default:
             return manualProvider;
     }
+}
+
+/**
+ * Validate a provider key by creating a temporary instance
+ */
+export async function validateProviderKey(providerName: ProviderName, key: string): Promise<boolean> {
+    if (providerName === 'manual') return true;
+
+    // LM Studio validates by checking if server is reachable (no key needed)
+    if (providerName === 'lmstudio') {
+        const adapter = new LMStudioAdapter();
+        return await adapter.validateApiKey();
+    }
+
+    let provider: AIProvider;
+
+    switch (providerName) {
+        case 'claude':
+            provider = new ClaudeAdapter(key);
+            break;
+        case 'gemini':
+            provider = new GeminiAdapter(key);
+            break;
+        case 'openai':
+            provider = new OpenAIAdapter(key);
+            break;
+        default:
+            return false;
+    }
+
+    return await provider.validateApiKey();
 }
 
 /**
@@ -185,6 +258,11 @@ export const PROVIDER_INFO: Record<ProviderName, { displayName: string; keyUrl: 
         displayName: 'GPT-4 (OpenAI)',
         keyUrl: 'https://platform.openai.com/api-keys',
         placeholder: 'sk-...',
+    },
+    lmstudio: {
+        displayName: 'LM Studio (Local)',
+        keyUrl: '',
+        placeholder: '',
     },
     manual: {
         displayName: 'Continue Manually',

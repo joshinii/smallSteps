@@ -5,15 +5,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAI, useAIWithFallback } from '@/lib/ai/AIContext';
+import { useToast } from '@/lib/ToastContext';
 import { goalsDB, tasksDB } from '@/lib/db';
-import { minutesToEffortLabel, generateId } from '@/lib/schema';
+import { minutesToEffortLabel, generateId, formatDisplayDate } from '@/lib/utils';
 import type { TaskSuggestion, GoalPlan } from '@/lib/ai/ai-provider';
 import { DragHandleIcon, CloseIcon, SparklesIcon } from '@/components/icons';
-import { assessTargetDateFeasibility, suggestTargetDate, reassessDailyPlans, assessTotalWorkload, type FeasibilityResult } from '@/lib/planning-engine';
+import { assessTargetDateFeasibility, suggestTargetDate, reassessDailyPlans, assessTotalWorkload, assessGoalAdmission, type FeasibilityResult } from '@/lib/planning-engine';
 
 interface GoalCreatorProps {
     onComplete?: () => void;
     onCancel?: () => void;
+    onDelete?: () => void;
     existingGoal?: {
         id: string;
         content: string;
@@ -34,7 +36,7 @@ interface EditableTask extends TaskSuggestion {
     id: string;
 }
 
-export default function GoalCreator({ onComplete, onCancel, existingGoal }: GoalCreatorProps) {
+export default function GoalCreator({ onComplete, onCancel, onDelete, existingGoal }: GoalCreatorProps) {
     const isEditMode = !!existingGoal;
 
     const [step, setStep] = useState<Step>(isEditMode ? 'review' : 'input');
@@ -57,9 +59,11 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
     const [feasibility, setFeasibility] = useState<FeasibilityResult | null>(null);
     const [showFeasibilityWarning, setShowFeasibilityWarning] = useState(false);
     const [workloadWarning, setWorkloadWarning] = useState<string | null>(null);
+    const [aiTotalEstimate, setAiTotalEstimate] = useState<number | null>(null);
 
     const { openSetupModal, isConfigured, provider } = useAI();
     const { getAIOrPrompt } = useAIWithFallback();
+    const { showToast } = useToast();
 
     const handleDecompose = async (userFeedback?: string) => {
         if (!goalText.trim()) {
@@ -77,21 +81,39 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
             const { provider: aiProvider, needsSetup } = getAIOrPrompt();
 
             if (needsSetup && provider === 'manual') {
-                // Using manual provider, continue anyway
+                // Using manual provider
+                showToast("Using offline templates. Connect AI for better results.", "info");
             } else if (needsSetup) {
                 openSetupModal();
                 setStep('input');
                 return;
             }
 
-            const plan: GoalPlan = await aiProvider.decomposeGoal(
-                goalText.trim(),
-                targetDate || undefined,
-                userFeedback,
-                isLifelong
-            );
+            let plan: GoalPlan;
+
+            try {
+                plan = await aiProvider.decomposeGoal(
+                    goalText.trim(),
+                    targetDate || undefined,
+                    userFeedback,
+                    isLifelong
+                );
+            } catch (aiError) {
+                console.warn('AI failed, falling back to manual', aiError);
+                showToast("AI connection failed. Switched to offline mode.", "calm-alert");
+
+                // Fallback to manual
+                const { manualProvider } = await import('@/lib/ai/ai-provider');
+                plan = await manualProvider.decomposeGoal(
+                    goalText.trim(),
+                    targetDate || undefined,
+                    userFeedback,
+                    isLifelong
+                );
+            }
 
             setRationale(plan.rationale);
+            setAiTotalEstimate(plan.totalEstimatedMinutes || null);
             setTasks(
                 plan.tasks.map((t) => ({
                     ...t,
@@ -99,13 +121,11 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                 }))
             );
 
-            if (plan.suggestedTargetDate && !targetDate) {
-                setSuggestedDate(plan.suggestedTargetDate);
-            }
+
 
             setStep('review');
         } catch (err) {
-            console.error('Decomposition error:', err);
+            console.error('Final decomposition error:', err);
             setError('Something went wrong. Please try again.');
             setStep('input');
         } finally {
@@ -130,7 +150,7 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                 id: generateId(),
                 content: '',
                 estimatedMinutes: 20,
-                isRecurring: false,
+                isRecurring: isLifelong, // Only default to true if it's a habit goal
             },
         ]);
     };
@@ -196,35 +216,33 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
     // Auto-suggest target date when tasks change
     useEffect(() => {
         const autoSuggestDate = async () => {
-            if (tasks.length > 0 && !targetDate && !suggestedDate && step === 'review') {
+            if (tasks.length > 0 && !targetDate && !suggestedDate && step === 'review' && !isLifelong) {
                 const totalMinutes = tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
                 const suggested = await suggestTargetDate(totalMinutes, existingGoal?.id);
                 setSuggestedDate(suggested);
+                setTargetDate(suggested); // Auto-populate field
             }
         };
         autoSuggestDate();
-    }, [tasks, targetDate, suggestedDate, step, existingGoal]);
+    }, [tasks, targetDate, suggestedDate, step, existingGoal, isLifelong]);
 
-    const handleSave = async () => {
+    const handleSave = async (overrideDate?: string | React.MouseEvent) => {
+        const effectiveDate = typeof overrideDate === 'string' ? overrideDate : (targetDate || suggestedDate);
+
         if (tasks.length === 0) {
             setError('Add at least one task');
             return;
         }
 
-        // Check feasibility if target date is set
-        if ((targetDate || suggestedDate) && !isLifelong) {
-            const totalMinutes = tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
-            const result = await assessTargetDateFeasibility(
-                totalMinutes,
-                targetDate || suggestedDate || '',
-                existingGoal?.id
-            );
+        // Feasibility check removed to allow gentle, non-blocking flow
+        // The date is just a target, not a hard deadline.
 
-            if (!result.isFeasible) {
-                setFeasibility(result);
-                setShowFeasibilityWarning(true);
-                return; // Don't save until user accepts suggested date or reduces scope
-            }
+        // ADMISSION CHECK (Hybrid)
+        const totalMinutes = tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
+        const admission = await assessGoalAdmission(totalMinutes);
+
+        if (admission.paceAdjustment === 'gentle') {
+            showToast(admission.message || "High workload detected. We'll start this goal gently.", "info");
         }
 
         setStep('saving');
@@ -236,8 +254,8 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                 // Update existing goal
                 await goalsDB.update(existingGoal.id, {
                     content: goalText.trim(),
-                    targetDate: targetDate || suggestedDate || undefined,
-                    estimatedTargetDate: suggestedDate || undefined,
+                    targetDate: effectiveDate || undefined,
+                    estimatedTargetDate: suggestedDate || undefined, // Keep track if it was AI suggested
                     lifelong: isLifelong,
                 });
                 goalId = existingGoal.id;
@@ -251,7 +269,7 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                 // Create new goal
                 const goal = await goalsDB.create({
                     content: goalText.trim(),
-                    targetDate: targetDate || suggestedDate || undefined,
+                    targetDate: effectiveDate || undefined,
                     estimatedTargetDate: suggestedDate || undefined,
                     lifelong: isLifelong,
                     status: 'active',
@@ -369,9 +387,9 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                                 className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
                             >
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <line x1="12" y1="8" x2="12" y2="16"/>
-                                    <line x1="8" y1="12" x2="16" y2="12"/>
+                                    <circle cx="12" cy="12" r="10" />
+                                    <line x1="12" y1="8" x2="12" y2="16" />
+                                    <line x1="8" y1="12" x2="16" y2="12" />
                                 </svg>
                                 Connect to AI
                             </button>
@@ -432,7 +450,7 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
 
                 {suggestedDate && !targetDate && (
                     <div className="mb-6 p-3 bg-gray-50 rounded-xl text-sm text-muted">
-                        Suggested timeline: {new Date(suggestedDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                        Suggested timeline: {formatDisplayDate(suggestedDate)}
                         <button
                             onClick={() => setTargetDate(suggestedDate)}
                             className="ml-2 text-accent hover:underline"
@@ -465,15 +483,17 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                                     placeholder="Task description..."
                                 />
                                 <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                    <label className="flex items-center gap-1.5 text-xs text-muted">
-                                        <input
-                                            type="checkbox"
-                                            checked={task.isRecurring}
-                                            onChange={(e) => handleUpdateTask(task.id, { isRecurring: e.target.checked })}
-                                            className="rounded"
-                                        />
-                                        Daily
-                                    </label>
+                                    {isLifelong && (
+                                        <label className="flex items-center gap-1.5 text-xs text-muted">
+                                            <input
+                                                type="checkbox"
+                                                checked={task.isRecurring}
+                                                onChange={(e) => handleUpdateTask(task.id, { isRecurring: e.target.checked })}
+                                                className="rounded"
+                                            />
+                                            Daily Habit
+                                        </label>
+                                    )}
 
                                     {/* Effort Level Selector */}
                                     <div className="flex items-center gap-1.5">
@@ -537,7 +557,7 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                 </div>
 
                 {/* Target Date Editor */}
-                {(targetDate || suggestedDate) && !showFeasibilityWarning && (
+                {(targetDate || suggestedDate) && (
                     <div className="mt-4 p-3 bg-gray-50 rounded-xl">
                         <label className="block text-xs text-muted mb-2">Target date (optional)</label>
                         <input
@@ -552,61 +572,59 @@ export default function GoalCreator({ onComplete, onCancel, existingGoal }: Goal
                 {/* Feasibility Warning */}
                 {showFeasibilityWarning && feasibility && !feasibility.isFeasible && (
                     <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                        <p className="text-sm text-foreground font-medium">Wait, that might be too soon!</p>
                         <p className="text-sm text-foreground">{feasibility.message}</p>
-                        <p className="text-xs text-muted">
-                            Based on your current pace, this would need about {Math.round(feasibility.totalTaskMinutes / 60)} hours spread across {feasibility.daysAvailable} days.
-                        </p>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => {
-                                    if (feasibility.suggestedDate) {
-                                        setTargetDate(feasibility.suggestedDate);
-                                        setSuggestedDate('');
-                                        setShowFeasibilityWarning(false);
-                                        setFeasibility(null);
-                                    }
-                                }}
-                                className="px-4 py-2 bg-foreground text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
-                            >
-                                Accept suggested date ({feasibility.suggestedDate})
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setShowFeasibilityWarning(false);
-                                    setStep('review'); // Go back to review to edit tasks
-                                }}
-                                className="px-4 py-2 border-2 border-gray-200 text-foreground rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
-                            >
-                                Reduce scope
-                            </button>
+
+                        {feasibility.suggestedDate && (
+                            <p className="text-xs text-muted">
+                                A more realistic date based on your pace would be <strong>{formatDisplayDate(feasibility.suggestedDate)}</strong>.
+                            </p>
+                        )}
+
+                        <div className="mt-2 text-sm font-medium text-foreground">
+                            Please adjust the target date above or reduce your tasks.
                         </div>
                     </div>
                 )}
 
+
                 {/* Workload Warning */}
-                {workloadWarning && (
-                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                        <p className="text-sm text-foreground">{workloadWarning}</p>
-                    </div>
-                )}
+                {
+                    workloadWarning && (
+                        <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                            <p className="text-sm text-foreground">{workloadWarning}</p>
+                        </div>
+                    )
+                }
 
                 {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
-                <div className="flex gap-3 mt-6">
-                    <button
-                        onClick={handleSave}
-                        className="px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 transition-opacity font-medium"
-                    >
-                        {isEditMode ? 'Update Goal' : 'Save Goal'}
-                    </button>
-                    <button
-                        onClick={() => setStep('input')}
-                        className="px-6 py-3 text-muted hover:text-foreground rounded-xl border-2 border-gray-100 hover:border-gray-200 transition-colors"
-                    >
-                        Back
-                    </button>
+                <div className="flex gap-3 mt-6 justify-between">
+                    <div className="flex gap-3">
+                        <button
+                            onClick={handleSave}
+                            className="px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 transition-opacity font-medium"
+                        >
+                            {isEditMode ? 'Update Goal' : 'Save Goal'}
+                        </button>
+                        <button
+                            onClick={() => setStep('input')}
+                            className="px-6 py-3 text-muted hover:text-foreground rounded-xl border-2 border-gray-100 hover:border-gray-200 transition-colors"
+                        >
+                            Back
+                        </button>
+                    </div>
+                    {isEditMode && onDelete && (
+                        <button
+                            onClick={onDelete}
+                            className="px-6 py-3 text-red-500 hover:text-white hover:bg-red-500 rounded-xl border-2 border-red-200 hover:border-red-500 transition-colors font-medium"
+                            title="Delete this goal"
+                        >
+                            Delete Goal
+                        </button>
+                    )}
                 </div>
-            </div>
+            </div >
         );
     }
 

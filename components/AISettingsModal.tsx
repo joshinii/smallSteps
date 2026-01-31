@@ -5,32 +5,65 @@
 
 import React, { useState } from 'react';
 import { useAI } from '@/lib/ai/AIContext';
-import { ProviderName, PROVIDER_INFO, hasApiKey, hasStorageConsent, setStorageConsent } from '@/lib/ai';
+import { ProviderName, PROVIDER_INFO, hasApiKey, hasStorageConsent, setStorageConsent, validateProviderKey, isLocalProvider } from '@/lib/ai';
 
 export default function AISettingsModal() {
-    const { showSetupModal, closeSetupModal, configureProvider, provider: currentProvider } = useAI();
+    const { showSetupModal, closeSetupModal, configureProvider, removeKey, provider: currentProvider } = useAI();
     const [selectedProvider, setSelectedProvider] = useState<ProviderName>(
         currentProvider === 'manual' ? 'claude' : currentProvider
     );
     const [apiKey, setApiKey] = useState('');
     const [error, setError] = useState('');
+    const [isValidating, setIsValidating] = useState(false);
     const [rememberKey, setRememberKey] = useState(hasStorageConsent());
 
     if (!showSetupModal) return null;
 
     const providerInfo = PROVIDER_INFO[selectedProvider];
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (selectedProvider !== 'manual' && !apiKey.trim()) {
+
+        // Local providers (manual, lmstudio) don't need API keys
+        const needsApiKey = !isLocalProvider(selectedProvider);
+
+        if (needsApiKey && !apiKey.trim()) {
             setError('Please enter an API key');
             return;
         }
-        // Set storage consent before configuring
-        setStorageConsent(rememberKey);
-        configureProvider(selectedProvider, apiKey.trim());
-        setApiKey('');
+
+        setIsValidating(true);
         setError('');
+
+        try {
+            // Verify key if not manual or lmstudio
+            if (needsApiKey) {
+                const isValid = await validateProviderKey(selectedProvider, apiKey.trim());
+                if (!isValid) {
+                    setError(`Invalid API key for ${PROVIDER_INFO[selectedProvider].displayName}. Please check and try again.`);
+                    setIsValidating(false);
+                    return;
+                }
+            } else if (selectedProvider === 'lmstudio') {
+                // For LM Studio, just validate connection
+                const isValid = await validateProviderKey(selectedProvider, '');
+                if (!isValid) {
+                    setError('Cannot connect to LM Studio. Make sure the server is running on localhost:1234.');
+                    setIsValidating(false);
+                    return;
+                }
+            }
+
+            // Set storage consent before configuring
+            setStorageConsent(rememberKey);
+            configureProvider(selectedProvider, apiKey.trim());
+            setApiKey('');
+            setError('');
+        } catch (err) {
+            setError('Validation failed due to network error.');
+        } finally {
+            setIsValidating(false);
+        }
     };
 
     const handleSkip = () => {
@@ -58,12 +91,12 @@ export default function AISettingsModal() {
                             Choose a provider
                         </label>
                         <div className="space-y-2">
-                            {(['claude', 'gemini', 'openai'] as ProviderName[]).map((name) => (
+                            {(['lmstudio', 'claude', 'gemini', 'openai'] as ProviderName[]).map((name) => (
                                 <label
                                     key={name}
                                     className={`flex items-center p-3 rounded-xl border-2 cursor-pointer transition-all ${selectedProvider === name
-                                            ? 'border-accent bg-accent/5'
-                                            : 'border-gray-100 hover:border-gray-200'
+                                        ? 'border-accent bg-accent/5'
+                                        : 'border-gray-100 hover:border-gray-200'
                                         }`}
                                 >
                                     <input
@@ -80,41 +113,72 @@ export default function AISettingsModal() {
                                     <span className="font-medium text-foreground">
                                         {PROVIDER_INFO[name].displayName}
                                     </span>
-                                    {hasApiKey(name) && (
-                                        <span className="ml-auto text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                                            Configured
-                                        </span>
+                                    {hasApiKey(name) && selectedProvider !== name && (
+                                        <div className="ml-auto flex items-center gap-2">
+                                            <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                                                Active
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    e.preventDefault();
+                                                    if (confirm(`Remove API key for ${PROVIDER_INFO[name].displayName}?`)) {
+                                                        removeKey(name);
+                                                    }
+                                                }}
+                                                className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                                title="Remove API Key"
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
                                     )}
                                 </label>
                             ))}
                         </div>
                     </div>
 
-                    {/* API Key Input */}
-                    <div className="mb-6">
-                        <label className="block text-sm font-medium text-muted mb-2">
-                            API Key
-                        </label>
-                        <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(e) => {
-                                setApiKey(e.target.value);
-                                setError('');
-                            }}
-                            placeholder={providerInfo.placeholder}
-                            className="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-accent focus:outline-none transition-colors"
-                        />
-                        {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-                        <a
-                            href={providerInfo.keyUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-block mt-2 text-sm text-accent hover:underline"
-                        >
-                            Get a {PROVIDER_INFO[selectedProvider].displayName} key →
-                        </a>
-                    </div>
+                    {/* API Key Input - Hidden for LM Studio (local) */}
+                    {selectedProvider !== 'lmstudio' && (
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium text-muted mb-2">
+                                API Key
+                            </label>
+                            <input
+                                type="password"
+                                value={apiKey}
+                                onChange={(e) => {
+                                    setApiKey(e.target.value);
+                                    setError('');
+                                }}
+                                placeholder={providerInfo.placeholder}
+                                className="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-accent focus:outline-none transition-colors"
+                            />
+                            {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+                            <a
+                                href={providerInfo.keyUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-block mt-2 text-sm text-accent hover:underline"
+                            >
+                                Get a {PROVIDER_INFO[selectedProvider].displayName} key →
+                            </a>
+                        </div>
+                    )}
+
+                    {/* LM Studio info */}
+                    {selectedProvider === 'lmstudio' && (
+                        <div className="mb-6 p-4 bg-green-50 rounded-xl border border-green-100">
+                            <p className="text-sm text-green-800">
+                                <strong>Local AI</strong> — No API key needed. Make sure LM Studio server is running on localhost:1234.
+                            </p>
+                            {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+                        </div>
+                    )}
 
                     {/* Remember Key Checkbox */}
                     <div className="mb-6">
@@ -138,9 +202,17 @@ export default function AISettingsModal() {
                     <div className="flex gap-3">
                         <button
                             type="submit"
-                            className="flex-1 px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 transition-opacity font-medium"
+                            disabled={isValidating}
+                            className="flex-1 px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 transition-opacity font-medium disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                            Connect
+                            {isValidating ? (
+                                <>
+                                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    Verifying...
+                                </>
+                            ) : (
+                                'Connect'
+                            )}
                         </button>
                         <button
                             type="button"
