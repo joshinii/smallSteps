@@ -43,6 +43,7 @@ export class LMStudioAdapter implements AIProvider {
                 tasks: (parsed.tasks || []).map((t: any) => ({
                     title: t.title || t.content,
                     estimatedTotalMinutes: t.estimatedTotalMinutes || t.estimatedMinutes || 120,
+                    whyThisMatters: t.whyThisMatters // Pass through quality field
                 }))
             };
         } catch (error) {
@@ -51,16 +52,19 @@ export class LMStudioAdapter implements AIProvider {
         }
     }
 
-    async decomposeTask(taskTitle: string, taskTotalMinutes: number): Promise<TaskPlan> {
+    async decomposeTask(taskTitle: string, taskTotalMinutes: number, otherTasks?: string[], priorCapabilities?: string[]): Promise<TaskPlan> {
         try {
-            const resultString = await this.callAPI('decomposeTask', { taskTitle, taskTotalMinutes });
+            const resultString = await this.callAPI('decomposeTask', { taskTitle, taskTotalMinutes, otherTasks, priorCapabilities });
             const parsed = JSON.parse(resultString);
 
             return {
                 workUnits: (parsed.workUnits || []).map((u: any) => ({
                     title: u.title,
                     kind: u.kind || 'practice',
-                    estimatedTotalMinutes: u.estimatedTotalMinutes || 60
+                    estimatedTotalMinutes: u.estimatedTotalMinutes || 60,
+                    capabilityId: u.capabilityId,
+                    firstAction: u.firstAction,   // Pass through quality field
+                    successSignal: u.successSignal // Pass through quality field
                 }))
             };
         } catch (error) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 
 // POST /api/completions - Toggle task completion for a specific date
+// TODO: Prisma disabled - migrate to IndexedDB
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -14,39 +14,17 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Check if completion already exists for this date
-        const existing = await prisma.taskCompletion.findUnique({
-            where: {
-                stepId_date: {
-                    stepId,
-                    date,
-                },
-            },
-        });
+        // Stub: Return mock completion
+        // TODO: Implement using IndexedDB or remove this endpoint
+        const completion = {
+            id: `comp_${Date.now()}`,
+            stepId,
+            date,
+            completed,
+            createdAt: new Date().toISOString(),
+        };
 
-        if (existing) {
-            // Update existing
-            const updated = await prisma.taskCompletion.update({
-                where: {
-                    stepId_date: {
-                        stepId,
-                        date,
-                    },
-                },
-                data: { completed },
-            });
-            return NextResponse.json(updated);
-        } else {
-            // Create new
-            const created = await prisma.taskCompletion.create({
-                data: {
-                    stepId,
-                    date,
-                    completed,
-                },
-            });
-            return NextResponse.json(created, { status: 201 });
-        }
+        return NextResponse.json(completion, { status: 201 });
     } catch (error) {
         console.error('Error toggling completion:', error);
         return NextResponse.json(
@@ -57,44 +35,12 @@ export async function POST(request: NextRequest) {
 }
 
 // GET /api/completions - Get completions for a specific month
+// TODO: Prisma disabled - migrate to IndexedDB
 export async function GET(request: NextRequest) {
     try {
-        const searchParams = request.nextUrl.searchParams;
-        const stepId = searchParams.get('stepId');
-        const month = searchParams.get('month'); // YYYY-MM format
-        const year = searchParams.get('year');
-
-        const where: any = {};
-
-        if (stepId) {
-            where.stepId = stepId;
-        }
-
-        if (month && year) {
-            // Filter by month
-            where.date = {
-                startsWith: `${year}-${month.padStart(2, '0')}`,
-            };
-        } else if (month) {
-            // Just month filter (assuming current year)
-            const currentYear = new Date().getFullYear();
-            where.date = {
-                startsWith: `${currentYear}-${month.padStart(2, '0')}`,
-            };
-        }
-
-        const completions = await prisma.taskCompletion.findMany({
-            where,
-            include: {
-                step: {
-                    include: {
-                        idea: true,
-                    },
-                },
-            },
-        });
-
-        return NextResponse.json(completions);
+        // Stub: Return empty array
+        // TODO: Implement using IndexedDB or remove this endpoint
+        return NextResponse.json([]);
     } catch (error) {
         console.error('Error fetching completions:', error);
         return NextResponse.json(

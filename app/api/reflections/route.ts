@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 
 // POST /api/reflections - Create a reflection
+// TODO: Prisma disabled - migrate to IndexedDB
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -14,20 +14,15 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        if (!['LIGHTER', 'NEUTRAL', 'HARD'].includes(feeling)) {
-            return NextResponse.json(
-                { error: 'Invalid feeling value' },
-                { status: 400 }
-            );
-        }
-
-        const reflection = await prisma.reflection.create({
-            data: {
-                stepId,
-                feeling,
-                note: note || null,
-            },
-        });
+        // Stub: Return mock reflection
+        // TODO: Implement using IndexedDB or remove this endpoint
+        const reflection = {
+            id: `ref_${Date.now()}`,
+            stepId,
+            feeling,
+            note: note || null,
+            createdAt: new Date().toISOString(),
+        };
 
         return NextResponse.json(reflection, { status: 201 });
     } catch (error) {

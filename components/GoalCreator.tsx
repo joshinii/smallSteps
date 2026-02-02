@@ -39,7 +39,7 @@ interface EditableTask extends TaskSuggestion {
     title: string;
 }
 
-// Define TaskItem based on the new structure provided in the instruction
+// Define TaskItem based on the new structure with quality fields
 interface TaskItem {
     id: string;
     title: string;
@@ -51,6 +51,8 @@ interface TaskItem {
         kind: 'study' | 'practice' | 'build' | 'review' | 'explore';
         estimatedTotalMinutes: number;
         capabilityId?: string;
+        firstAction?: string;   // Quality: tiny first step
+        successSignal?: string; // Quality: how to know you're done
     }>;
     isEditing: boolean;
 }
@@ -328,7 +330,9 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                             kind: u.kind,
                             estimatedTotalMinutes: u.estimatedTotalMinutes,
                             completedMinutes: 0,
-                            capabilityId: u.capabilityId
+                            capabilityId: u.capabilityId,
+                            firstAction: u.firstAction,     // Quality field
+                            successSignal: u.successSignal  // Quality field
                         });
                     }
                 } else {
@@ -338,6 +342,8 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                         kind: 'practice',
                         estimatedTotalMinutes: savedTask.estimatedTotalMinutes,
                         completedMinutes: 0,
+                        firstAction: 'Take a moment to prepare your workspace',
+                        successSignal: 'You made meaningful progress on this'
                     });
                 }
             }
@@ -449,7 +455,7 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                     try {
                         const plan = await aiProvider.decomposeTask(t.title, t.minutes);
 
-                        // Save WorkUnits
+                        // Save WorkUnits with quality fields
                         for (const u of plan.workUnits) {
                             await workUnitsDB.create({
                                 taskId: t.id,
@@ -457,29 +463,36 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                                 kind: u.kind,
                                 estimatedTotalMinutes: u.estimatedTotalMinutes,
                                 completedMinutes: 0,
+                                capabilityId: u.capabilityId,
+                                firstAction: u.firstAction,     // Quality field
+                                successSignal: u.successSignal  // Quality field
                             });
                         }
                     } catch (e) {
                         console.warn(`Failed to decompose task ${t.title}`, e);
-                        // Fallback: Create one generic work unit
+                        // Fallback: Create one generic work unit with defaults
                         await workUnitsDB.create({
                             taskId: t.id,
                             title: `Work on ${t.title}`,
                             kind: 'practice',
                             estimatedTotalMinutes: t.minutes,
                             completedMinutes: 0,
+                            firstAction: 'Take a moment to prepare your workspace',
+                            successSignal: 'You made meaningful progress on this'
                         });
                     }
                 }
             } else {
-                // Manual mode: Create generic work units
+                // Manual mode: Create generic work units with defaults
                 for (const t of savedTasks) {
                     await workUnitsDB.create({
                         taskId: t.id,
                         title: `Work on ${t.title}`,
                         kind: 'practice',
-                        estimatedTotalMinutes: t.minutes, // Just one big unit
+                        estimatedTotalMinutes: t.minutes,
                         completedMinutes: 0,
+                        firstAction: 'Take a moment to prepare your workspace',
+                        successSignal: 'You made meaningful progress on this'
                     });
                 }
             }

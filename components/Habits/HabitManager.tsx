@@ -25,8 +25,9 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
 
     const fetchHabits = async () => {
         try {
-            const recurring = await tasksDB.getRecurring();
-            setHabits(recurring);
+            // Legacy: getRecurring was removed. Habits now use separate habitsDB.
+            // TODO: Migrate this component to use habitsDB
+            setHabits([]);
         } catch (e) {
             console.error('Failed to fetch habits', e);
         } finally {
@@ -42,11 +43,11 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
         try {
             // 1. Find or Create "Daily Habits" Goal
             const allGoals = await goalsDB.getAll();
-            let habitGoal = allGoals.find(g => g.content === 'Daily Habits');
+            let habitGoal = allGoals.find(g => g.title === 'Daily Habits');
 
             if (!habitGoal) {
                 habitGoal = await goalsDB.create({
-                    content: 'Daily Habits',
+                    title: 'Daily Habits',
                     status: 'active',
                     lifelong: true,
                     // No target date for general habits
@@ -54,16 +55,14 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
             }
 
             // 2. Create Task
+            // TODO: Migrate to use habitsDB instead of tasksDB
+            // Legacy fields removed from Task schema: category, effortLabel, isRecurring, skipCount
             await tasksDB.create({
                 goalId: habitGoal.id,
-                content: newName.trim(),
-                category: newType, // Store type in category
+                title: newName.trim(),
                 estimatedTotalMinutes: 20, // Default duration
                 completedMinutes: 0,
-                effortLabel: 'settle', // Default
-                isRecurring: true,
                 order: habits.length,
-                skipCount: 0
             });
 
             setNewName('');
@@ -78,19 +77,15 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
     };
 
     const handlePause = async (id: string) => {
-        if (!confirm('Stop this habit? (This converts it to a regular task or deletes it if you prefer. For now we will delete it to keep it simple.)')) return;
+        if (!confirm('Stop this habit? This will delete the task.')) return;
         try {
-            // Option: Toggle isRecurring=false? Or Delete?
-            // "Pause" in old system meant archive.
-            // Here, let's just delete the task or toggle recurring off.
-            // If I toggle recurring off, it disappears from Matrix. That's effectively pausing.
-            // But it stays in the Goal list as a one-off task.
-            // Let's toggle recurring off.
-            await tasksDB.update(id, { isRecurring: false });
+            // Legacy: isRecurring field removed from Task schema
+            // Just delete the task
+            await tasksDB.delete(id);
             fetchHabits();
             onUpdate();
         } catch (e) {
-            console.error('Failed to pause habit', e);
+            console.error('Failed to delete habit', e);
         }
     };
 
@@ -155,12 +150,10 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
                                         className="group flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 rounded-xl border border-transparent hover:border-gray-200 transition-all"
                                     >
                                         <div className="flex items-center gap-3 flex-1 min-w-0">
-                                            <span className="text-2xl flex-shrink-0">{getTypeIcon(habit.category)}</span>
+                                            <span className="text-2xl flex-shrink-0">●</span>
                                             <div className="min-w-0 flex-1">
-                                                <p className="font-medium text-foreground truncate">{habit.content}</p>
-                                                <p className="text-xs text-muted capitalize">
-                                                    {habit.category?.toLowerCase().replace('_', ' ') || 'General'}
-                                                </p>
+                                                <p className="font-medium text-foreground truncate">{habit.title}</p>
+                                                <p className="text-xs text-muted capitalize">Habit</p>
                                             </div>
                                         </div>
                                         <button
