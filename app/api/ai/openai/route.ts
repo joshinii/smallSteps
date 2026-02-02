@@ -3,8 +3,17 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import {
+    getDecomposeGoalPrompt,
+    getDecomposeTaskPrompt,
+    getEstimateGoalEffortPrompt
+} from '@/lib/ai/prompts';
+import {
+    processGoalDecomposition,
+    processTaskDecomposition
+} from '@/lib/ai/enforcement';
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o'; // Use efficient model
 
 export async function POST(request: NextRequest) {
     try {
@@ -22,56 +31,39 @@ export async function POST(request: NextRequest) {
         switch (action) {
             case 'decomposeGoal': {
                 const { goalText, targetDate } = payload;
-                const targetDateContext = targetDate
-                    ? `\nTarget completion: ${new Date(targetDate).toLocaleDateString()}`
-                    : '';
-
-                const prompt = `You are a helper breaking a goal into ACTUAL WORK.
-Goal: "${goalText}"${targetDateContext}
-
-**PROCESS:**
-1. List steps.
-2. Refine: If task > 60m → Break down OR Make Recurring.
-3. Finalize: Actionable tasks only.
-
-**STRICT RULES:**
-- MAX DURATION: 60 mins non-recurring.
-- NO FLUFF: No "Track progress", "Celebrate".
-- QUANTITY: "Read 5 books" → "Read Book 1" (Recur).
-- TOTAL EFFORT: Estimate *entire* volume.
-
-**Output Format (JSON only):**
-{
-  "rationale": "Explanation",
-  "totalEstimatedMinutes": 3000,
-  "tasks": [
-    { "content": "Read Book 1", "estimatedMinutes": 45, "isRecurring": true }
-  ]
-}`;
+                const prompt = getDecomposeGoalPrompt(goalText, targetDate);
 
                 const response = await client.chat.completions.create({
                     model: DEFAULT_MODEL,
                     messages: [{ role: 'user', content: prompt }],
-                    temperature: 0.7,
-                    max_tokens: 2048,
+                    temperature: 0.3,
+                    max_tokens: 4096,
                 });
 
                 const text = response.choices[0]?.message?.content?.trim() || '';
-                return NextResponse.json({ result: text });
+                const result = processGoalDecomposition(text);
+                return NextResponse.json({ result });
             }
 
-            case 'estimateTaskEffort': {
-                const { taskContent } = payload;
-                const prompt = `Estimate how long this task realistically takes for an average person:
+            case 'decomposeTask': {
+                const { taskTitle, taskTotalMinutes } = payload;
+                const prompt = getDecomposeTaskPrompt(taskTitle, taskTotalMinutes);
 
-Task: "${taskContent}"
+                const response = await client.chat.completions.create({
+                    model: DEFAULT_MODEL,
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: 0.3,
+                    max_tokens: 4096,
+                });
 
-Respond with JSON only:
-{
-  "estimatedMinutes": <number 5-120>,
-  "confidence": "low" | "medium" | "high",
-  "rationale": "brief explanation"
-}`;
+                const text = response.choices[0]?.message?.content?.trim() || '';
+                const result = processTaskDecomposition(text);
+                return NextResponse.json({ result });
+            }
+
+            case 'estimateGoalEffort': {
+                const { goalText } = payload;
+                const prompt = getEstimateGoalEffortPrompt(goalText);
 
                 const response = await client.chat.completions.create({
                     model: DEFAULT_MODEL,
@@ -84,39 +76,14 @@ Respond with JSON only:
                 return NextResponse.json({ result: text });
             }
 
-            case 'identifyRecurringTasks': {
-                const { tasks } = payload;
-                const prompt = `For each task below, determine if it should be a recurring daily habit or a one-time action.
-
-Tasks:
-${tasks.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n')}
-
-Respond with JSON only:
-{
-  "suggestions": [
-    { "index": 0, "shouldBeRecurring": true, "frequency": "daily", "reason": "..." },
-    { "index": 1, "shouldBeRecurring": false }
-  ]
-}`;
-
-                const response = await client.chat.completions.create({
-                    model: DEFAULT_MODEL,
-                    messages: [{ role: 'user', content: prompt }],
-                    temperature: 0.3,
-                    max_tokens: 512,
-                });
-
-                const text = response.choices[0]?.message?.content?.trim() || '';
-                return NextResponse.json({ result: text });
-            }
-
             default:
                 return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
         }
+
     } catch (error: any) {
-        console.error('OpenAI API error:', error);
+        console.error('OpenAI API Error:', error);
         return NextResponse.json(
-            { error: error.message || 'Internal server error' },
+            { error: error.message || 'Failed to communicate with OpenAI' },
             { status: 500 }
         );
     }

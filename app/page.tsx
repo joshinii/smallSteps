@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { getLocalDate, getLocalDateString, isTaskEffectivelyComplete } from '@/lib/utils';
+import { getLocalDate, getLocalDateString, isTaskEffectivelyComplete, formatEffortDisplay } from '@/lib/utils';
 import DailyLog from '@/components/Habits/DailyLog';
 import MonthlyGrid from '@/components/Habits/MonthlyGrid';
 import { goalsDB, tasksDB } from '@/lib/db';
@@ -32,26 +32,16 @@ const TaskItem = ({
                 <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-2">
                         <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'text-muted' : ''}`}>
-                            {task.content}
+                            {task.title || task.content}
                         </p>
-                        <div className="flex items-center gap-1 flex-shrink-0 mt-1">
-                            {/* Effort Indicator */}
-                            <Tooltip content={`${task.effortLabel} effort (~${task.estimatedTotalMinutes} min)`}>
-                                <span className="text-muted/60 inline-flex items-center">
-                                    {task.effortLabel === 'warm-up' && <EffortLightIcon />}
-                                    {task.effortLabel === 'settle' && <EffortMediumIcon />}
-                                    {task.effortLabel === 'dive' && <EffortHeavyIcon />}
-                                </span>
-                            </Tooltip>
-                        </div>
                     </div>
-                    {/* Progress Bar */}
-                    <div className="mt-2 h-1 bg-gray-100 rounded-full overflow-hidden w-full max-w-[200px]">
-                        <div
-                            className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-green-400' : 'bg-accent'}`}
-                            style={{ width: `${Math.min(100, progress)}%` }}
-                        />
-                    </div>
+                    {/* Calm effort display - just remaining hours */}
+                    <p className="text-xs text-muted mt-1">
+                        {isComplete
+                            ? 'Complete'
+                            : formatEffortDisplay(task.estimatedTotalMinutes - task.completedMinutes) + ' left'
+                        }
+                    </p>
                 </div>
             </div>
         </div>
@@ -163,10 +153,7 @@ export default function HomePage() {
     const handleDeleteGoal = async (goalId: string, goalContent: string) => {
         if (!confirm(`Delete "${goalContent}" and all its tasks?`)) return;
         try {
-            // Delete all tasks for this goal
-            const goalTasks = await tasksDB.getByGoalId(goalId);
-            await Promise.all(goalTasks.map(t => tasksDB.delete(t.id)));
-            // Delete goal
+            // Delete goal (casstades to tasks -> workUnits -> taskProgress)
             await goalsDB.delete(goalId);
 
             // Trigger daily plan reassessment
@@ -287,13 +274,13 @@ export default function HomePage() {
                                     } : undefined}
                                     existingGoal={editingGoal ? {
                                         id: editingGoal.id,
-                                        content: editingGoal.content,
+                                        title: editingGoal.title || (editingGoal as any).content, // Legacy support
                                         targetDate: editingGoal.targetDate,
                                         lifelong: editingGoal.lifelong,
                                         tasks: editingGoal.tasks.map(t => ({
                                             id: t.id,
-                                            content: t.content,
-                                            estimatedMinutes: t.estimatedTotalMinutes,
+                                            title: t.title || (t as any).content,
+                                            estimatedTotalMinutes: t.estimatedTotalMinutes,
                                             isRecurring: t.isRecurring,
                                         }))
                                     } : undefined}
@@ -366,7 +353,7 @@ export default function HomePage() {
                                                         >
                                                             <div className="flex items-center gap-3 mb-2">
                                                                 <h2 className="text-lg font-medium text-foreground">
-                                                                    {goal.content}
+                                                                    {goal.title || (goal as any).content}
                                                                 </h2>
                                                                 {isGoalRepetitive && (
                                                                     <span className="text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 font-medium" title="Daily Goal">
@@ -418,7 +405,7 @@ export default function HomePage() {
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    handleDeleteGoal(goal.id, goal.content);
+                                                                    handleDeleteGoal(goal.id, goal.title);
                                                                 }}
                                                                 className="text-gray-500 hover:text-red-500 hover:bg-red-50 px-3 py-1.5 rounded transition-colors text-sm font-medium"
                                                                 title="Delete goal"
@@ -479,7 +466,7 @@ export default function HomePage() {
                                                                             >
                                                                                 <CheckIcon size={10} />
                                                                             </button>
-                                                                            <span className="text-sm line-through text-muted">{task.content}</span>
+                                                                            <span className="text-sm line-through text-muted">{task.title || task.content}</span>
                                                                         </div>
                                                                     ))}
                                                                 </div>

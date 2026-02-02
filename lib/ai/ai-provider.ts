@@ -1,57 +1,58 @@
 // SmallSteps AI Provider Interface
 // Pluggable adapter system for Claude, Gemini, and OpenAI
+// Two-stage decomposition: Goal → Tasks → WorkUnits
 
 export interface TaskSuggestion {
-    content: string;
-    category?: string;
-    estimatedMinutes: number;
-    isRecurring: boolean;
-    frequency?: 'daily' | 'weekdays' | 'weekends' | 'weekly' | string;
+    title: string;
+    estimatedTotalMinutes: number;
+    // Legacy support (will be phased out or handled in enforcement)
+    content?: string;
+}
+
+export interface WorkUnitSuggestion {
+    title: string;
+    kind: 'study' | 'practice' | 'build' | 'review' | 'explore';
+    estimatedTotalMinutes: number;
+    capabilityId?: string;
 }
 
 export interface GoalPlan {
-    rationale: string;
+    rationale?: string;
     tasks: TaskSuggestion[];
-    totalEstimatedMinutes?: number; // Total effort for the entire goal (e.g. 1800 for reading 3 books)
+    totalEstimatedMinutes?: number;
+}
+
+export interface TaskPlan {
+    workUnits: WorkUnitSuggestion[];
 }
 
 export interface EffortEstimate {
-    estimatedMinutes: number;
+    estimatedTotalMinutes: number;
     confidence: 'low' | 'medium' | 'high';
     rationale?: string;
 }
 
-export interface RecurringSuggestion {
-    taskContent: string;
-    shouldBeRecurring: boolean;
-    frequency?: 'daily' | 'most_days' | 'occasionally';
-    reason?: string;
-}
-
 /**
  * Provider-agnostic AI interface for SmallSteps
- * Each provider implements these methods with their specific API
  */
 export interface AIProvider {
     readonly name: string;
     readonly displayName: string;
 
     /**
-     * Decompose a goal into actionable tasks
-     * Returns tasks with estimated effort (hidden from user)
-     * @param userFeedback - Optional feedback for AI regeneration (e.g., "Make tasks smaller")
+     * Stage 1: Decompose Goal into Tasks
      */
-    decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean): Promise<GoalPlan>;
+    decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string): Promise<GoalPlan>;
 
     /**
-     * Estimate effort for a single task
+     * Stage 2: Decompose Task into WorkUnits
      */
-    estimateTaskEffort(taskContent: string): Promise<EffortEstimate>;
+    decomposeTask(taskTitle: string, taskTotalMinutes: number, otherTasks?: string[], priorCapabilities?: string[]): Promise<TaskPlan>;
 
     /**
-     * Identify which tasks should be recurring (daily habits)
+     * Estimate total effort for a goal/task
      */
-    identifyRecurringTasks(tasks: string[]): Promise<RecurringSuggestion[]>;
+    estimateGoalEffort(goalText: string): Promise<EffortEstimate>;
 
     /**
      * Validate the API key (check connection/auth)
@@ -61,7 +62,6 @@ export interface AIProvider {
 
 /**
  * Fallback provider when no AI is available
- * Creates basic tasks without AI intelligence
  */
 export class ManualProvider implements AIProvider {
     readonly name = 'manual';
@@ -71,46 +71,33 @@ export class ManualProvider implements AIProvider {
         return true;
     }
 
-    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean): Promise<GoalPlan> {
+    async decomposeGoal(goalText: string): Promise<GoalPlan> {
         return {
-            rationale: 'Breaking this down into manageable steps.',
+            rationale: 'Manual fallback.',
             tasks: [
-                {
-                    content: `Start working on: ${goalText}`,
-                    estimatedMinutes: 30,
-                    isRecurring: !!isLifelong,
-                },
-                {
-                    content: 'Make incremental progress',
-                    estimatedMinutes: 25,
-                    isRecurring: !!isLifelong,
-                },
-                {
-                    content: 'Review and adjust approach',
-                    estimatedMinutes: 15,
-                    isRecurring: !!isLifelong,
-                },
+                { title: 'Task 1', estimatedTotalMinutes: 120 },
+                { title: 'Task 2', estimatedTotalMinutes: 180 },
             ],
         };
     }
 
-    async estimateTaskEffort(taskContent: string): Promise<EffortEstimate> {
-        // Default to medium effort
+    async decomposeTask(taskTitle: string, taskTotalMinutes: number, otherTasks?: string[], priorCapabilities?: string[]): Promise<TaskPlan> {
+        // Simple heuristic fallback
         return {
-            estimatedMinutes: 25,
-            confidence: 'low',
-            rationale: 'Default estimate without AI analysis',
+            workUnits: [
+                { title: `Start ${taskTitle}`, kind: 'practice', estimatedTotalMinutes: Math.floor(taskTotalMinutes * 0.4) },
+                { title: `Continue ${taskTitle}`, kind: 'build', estimatedTotalMinutes: Math.floor(taskTotalMinutes * 0.6) },
+            ]
         };
     }
 
-    async identifyRecurringTasks(tasks: string[]): Promise<RecurringSuggestion[]> {
-        // Without AI, we can't intelligently identify recurring tasks
-        return tasks.map((content) => ({
-            taskContent: content,
-            shouldBeRecurring: false,
-        }));
+    async estimateGoalEffort(goalText: string): Promise<EffortEstimate> {
+        return {
+            estimatedTotalMinutes: 600,
+            confidence: 'low',
+            rationale: 'Manual fallback'
+        };
     }
 }
 
-// Singleton manual provider
 export const manualProvider = new ManualProvider();

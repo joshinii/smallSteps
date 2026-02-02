@@ -11,6 +11,7 @@ import type { Task, Goal, TaskQueueEntry, EffortLevel } from './schema';
 import { effortLabelToLevel } from './schema';
 import { getISOTimestamp, isTaskEffectivelyComplete } from './utils';
 import type { DayType, AllocatedTask } from './planning-engine';
+import { logger, generateTraceId } from './logger';
 
 // ============================================
 // Mode-based effort weights for selection
@@ -58,6 +59,12 @@ export async function rehydrateQueues(): Promise<void> {
             await enqueueTask(task, goal);
         }
     }
+
+    logger.info('LOG.QUEUE_REHYDRATION', {
+        goalCount: allGoals.length,
+        taskCount: allTasks.length,
+        timestamp: new Date().toISOString()
+    }, { traceId: generateTraceId(), phase: 'TaskQueue.Rehydrate' });
 }
 
 // ============================================
@@ -84,6 +91,17 @@ export async function enqueueTask(task: Task, goal: Goal): Promise<void> {
     };
 
     await taskQueueDB.upsert(entry);
+
+    // Context is usually ephemeral here, so we generate a short trace
+    logger.info('LOG.QUEUE_ALLOCATION', {
+        taskId: task.id,
+        goalId: goal.id,
+        effortLevel: entry.effortLevel,
+        priorityFactors: {
+            goalTargetDate: goal.targetDate,
+            skipCount: task.skipCount
+        }
+    }, { traceId: generateTraceId(), phase: 'TaskQueue.Enqueue' });
 }
 
 /**

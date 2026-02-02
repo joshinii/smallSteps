@@ -1,20 +1,15 @@
 
 // Centralized constants for SmallSteps application
 
-// Effort Label Mapping
+// Effort Label Mapping (for internal planning engine use)
+// Thresholds: LIGHT <= 60 min, MEDIUM 61-360 min, HEAVY > 360 min
 export const EFFORT_MAPPING = {
-    'warm-up': { minMinutes: 5, maxMinutes: 10, avgMinutes: 7, label: 'warm-up', icon: 'light' },
-    'settle': { minMinutes: 20, maxMinutes: 30, avgMinutes: 25, label: 'settle', icon: 'medium' },
-    'dive': { minMinutes: 60, maxMinutes: 90, avgMinutes: 75, label: 'dive', icon: 'heavy' },
+    'warm-up': { minMinutes: 30, maxMinutes: 60, avgMinutes: 45, label: 'warm-up' },
+    'settle': { minMinutes: 61, maxMinutes: 360, avgMinutes: 180, label: 'settle' },
+    'dive': { minMinutes: 361, maxMinutes: 1800, avgMinutes: 600, label: 'dive' },
 } as const;
 
 export type EffortLabel = keyof typeof EFFORT_MAPPING;
-
-export const EFFORT_LEVELS = [
-    { value: 7, label: 'Warm-up (~5-10 min)', key: 'warm-up' },
-    { value: 25, label: 'Settle (~20-30 min)', key: 'settle' },
-    { value: 75, label: 'Dive (~60-90 min)', key: 'dive' },
-] as const;
 
 // Task Completion
 export const COMPLETION_THRESHOLD = 0.95;

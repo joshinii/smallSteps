@@ -1,23 +1,18 @@
 // SmallSteps LM Studio Adapter
-// Implements AIProvider interface using local LM Studio server (OpenAI-compatible API)
+// Implements AIProvider interface using server-side API proxy
 
-import type { AIProvider, GoalPlan, EffortEstimate, RecurringSuggestion } from './ai-provider';
+import type { AIProvider, GoalPlan, TaskPlan, EffortEstimate } from './ai-provider';
 
 export class LMStudioAdapter implements AIProvider {
     readonly name = 'lmstudio';
     readonly displayName = 'LM Studio (Local)';
 
-    constructor() {
-        // No API key needed for local LM Studio
-    }
-
     async validateApiKey(): Promise<boolean> {
         try {
-            // Just check if LM Studio server is reachable
-            await this.callAPI('estimateTaskEffort', { taskContent: 'test' });
+            await this.callAPI('estimateGoalEffort', { goalText: 'test' });
             return true;
         } catch (error) {
-            console.warn('LM Studio connection failed:', error);
+            console.warn('LM Studio validation failed:', error);
             return false;
         }
     }
@@ -31,28 +26,24 @@ export class LMStudioAdapter implements AIProvider {
 
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.error || 'LM Studio API call failed');
+            throw new Error(error.error || 'API call failed');
         }
 
         const data = await response.json();
         return data.result;
     }
 
-    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string): Promise<GoalPlan> {
+    async decomposeGoal(goalText: string, targetDate?: string): Promise<GoalPlan> {
         try {
-            const text = await this.callAPI('decomposeGoal', { goalText, targetDate, userFeedback });
-            const jsonText = this.extractJson(text);
-            const parsed = JSON.parse(jsonText);
+            const resultString = await this.callAPI('decomposeGoal', { goalText, targetDate });
+            const parsed = JSON.parse(resultString);
 
             return {
-                rationale: parsed.rationale || 'Breaking this into manageable steps.',
+                rationale: parsed.rationale,
                 tasks: (parsed.tasks || []).map((t: any) => ({
-                    content: t.content || t.task,
-                    category: t.category || 'action',
-                    estimatedMinutes: t.estimatedMinutes || 25,
-                    isRecurring: t.isRecurring || false,
-                })),
-                suggestedTargetDate: parsed.suggestedTargetDate,
+                    title: t.title || t.content,
+                    estimatedTotalMinutes: t.estimatedTotalMinutes || t.estimatedMinutes || 120,
+                }))
             };
         } catch (error) {
             console.error('LM Studio decomposeGoal error:', error);
@@ -60,48 +51,41 @@ export class LMStudioAdapter implements AIProvider {
         }
     }
 
-    async estimateTaskEffort(taskContent: string): Promise<EffortEstimate> {
+    async decomposeTask(taskTitle: string, taskTotalMinutes: number): Promise<TaskPlan> {
         try {
-            const text = await this.callAPI('estimateTaskEffort', { taskContent });
-            const parsed = JSON.parse(this.extractJson(text));
+            const resultString = await this.callAPI('decomposeTask', { taskTitle, taskTotalMinutes });
+            const parsed = JSON.parse(resultString);
 
             return {
-                estimatedMinutes: parsed.estimatedMinutes || 25,
-                confidence: parsed.confidence || 'medium',
+                workUnits: (parsed.workUnits || []).map((u: any) => ({
+                    title: u.title,
+                    kind: u.kind || 'practice',
+                    estimatedTotalMinutes: u.estimatedTotalMinutes || 60
+                }))
+            };
+        } catch (error) {
+            console.error('LM Studio decomposeTask error:', error);
+            throw error;
+        }
+    }
+
+    async estimateGoalEffort(goalText: string): Promise<EffortEstimate> {
+        try {
+            const resultString = await this.callAPI('estimateGoalEffort', { goalText });
+            const jsonText = resultString.includes('```json')
+                ? resultString.split('```json')[1].split('```')[0].trim()
+                : resultString;
+
+            const parsed = JSON.parse(jsonText);
+
+            return {
+                estimatedTotalMinutes: parsed.estimatedTotalMinutes || 600,
+                confidence: parsed.confidence || 'low',
                 rationale: parsed.rationale,
             };
         } catch (error) {
-            console.error('LM Studio estimateTaskEffort error:', error);
-            return { estimatedMinutes: 25, confidence: 'low' };
+            console.error('LM Studio estimateGoalEffort error:', error);
+            return { estimatedTotalMinutes: 600, confidence: 'low' };
         }
-    }
-
-    async identifyRecurringTasks(tasks: string[]): Promise<RecurringSuggestion[]> {
-        try {
-            const text = await this.callAPI('identifyRecurringTasks', { tasks });
-            const parsed = JSON.parse(this.extractJson(text));
-
-            return tasks.map((taskContent, i) => {
-                const suggestion = parsed.suggestions?.find((s: any) => s.index === i);
-                return {
-                    taskContent,
-                    shouldBeRecurring: suggestion?.shouldBeRecurring || false,
-                    frequency: suggestion?.frequency,
-                    reason: suggestion?.reason,
-                };
-            });
-        } catch (error) {
-            console.error('LM Studio identifyRecurringTasks error:', error);
-            return tasks.map((taskContent) => ({ taskContent, shouldBeRecurring: false }));
-        }
-    }
-
-    private extractJson(text: string): string {
-        if (text.includes('```json')) {
-            return text.split('```json')[1].split('```')[0].trim();
-        } else if (text.includes('```')) {
-            return text.split('```')[1].split('```')[0].trim();
-        }
-        return text;
     }
 }

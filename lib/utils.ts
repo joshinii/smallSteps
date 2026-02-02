@@ -1,4 +1,4 @@
-import { EFFORT_MAPPING, COMPLETION_THRESHOLD } from './constants';
+import { COMPLETION_THRESHOLD } from './constants';
 import type { Task } from './schema';
 
 /**
@@ -45,14 +45,16 @@ export function generateId(): string {
     return `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
-export function minutesToEffortLabel(minutes: number): Task['effortLabel'] {
-    if (minutes <= 15) return 'warm-up';
-    if (minutes <= 45) return 'settle';
-    return 'dive';
-}
+/**
+ * Convert minutes to effort label for internal planning use.
+ * Thresholds: LIGHT <= 60 min, MEDIUM 61-360 min, HEAVY > 360 min
+ */
+import type { SliceLabel } from './schema';
 
-export function effortLabelToMinutes(label: Task['effortLabel']): number {
-    return EFFORT_MAPPING[label].avgMinutes;
+export function minutesToEffortLabel(minutes: number): SliceLabel {
+    if (minutes <= 60) return 'warm-up';
+    if (minutes <= 360) return 'settle';
+    return 'dive';
 }
 
 export function isTaskEffectivelyComplete(task: Task): boolean {
@@ -63,4 +65,14 @@ export function isTaskEffectivelyComplete(task: Task): boolean {
 export function getTaskProgressPercentage(task: Task): number {
     if (task.estimatedTotalMinutes === 0) return 0;
     return Math.min(100, (task.completedMinutes / task.estimatedTotalMinutes) * 100);
+}
+
+/**
+ * Format effort in a calm, human-readable way.
+ * Examples: "~30 min", "~2 hrs", "~10 hrs"
+ */
+export function formatEffortDisplay(minutes: number): string {
+    if (minutes < 60) return `~${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    return `~${hours} hr${hours > 1 ? 's' : ''}`;
 }

@@ -1,68 +1,56 @@
-# SmallSteps ✨
+# SmallSteps
 
-**Reduce overwhelm. One small step at a time.**
+**Move forward without the overwhelm.**
 
-SmallSteps is a minimalist goal tracker designed to bridge the gap between big ambitions and daily action. It uses AI to decompose vague goals into tiny, concrete steps, helping you maintain a consistent daily rhythm without the stress.
-
----
-
-### 🌊 The Flow
-1. **Dream Big**: Input any goal, no matter how vague.
-2. **AI Action**: SmallSteps breaks it down into actionable daily tasks.
-3. **Daily Rhythm**: Log your "Small Moment" in a calm monthly grid.
-4. **Milestones**: Reflect on your journey and celebrate the small wins.
+SmallSteps is an effort-flow planning system. It converts goals into effort containers, quietly allocates work to your day, and helps you make progress — without deadlines, guilt, or burnout.
 
 ---
 
-### 🌟 Key Features
-- 🤖 **Smart Decomposition**: Powered by Claude AI to create specific, actionable plans.
-- 🔁 **Habits Matrix**: A beautiful, minimalist grid for tracking recurring daily actions.
-- 🧘 **Calm Mode**: Minimalist UI designed to keep you focused on the *next* thing only.
-- 📊 **Journey View**: Automated reflection on your progress and completed milestones.
+## How It Works
+
+```
+Goal → Tasks (effort containers) → Reservoir → Daily Slice
+```
+
+1. **Add a goal** — AI breaks it into realistic effort-based tasks
+2. **Effort flows** — Tasks drain over time as you work
+3. **Today's plan** — A gentle daily slice, auto-generated from your reservoir
+
+No schedules. No overdue. Just calm, consistent progress.
 
 ---
 
-### 📸 App Walkthrough
+## Core Principles
 
-| **Focus & Tasks** | **Habits** |
-| :---: | :---: |
-| ![Goal Management](public/screenshots/home_page.png) | ![Habit Matrix](public/screenshots/habits_page.png) |
-| *Manage goals and get AI steps* | *Track recurring daily actions* |
-
----
-
-### 🚀 Getting Started
-
-1. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
-
-2. **Configure Environment**:
-   Create a `.env.local` file with:
-   ```env
-   CLAUDE_API_KEY=your_key_here
-   DATABASE_URL="file:./dev.db"
-   ```
-
-3. **Initialize Database**:
-   ```bash
-   npx prisma migrate dev
-   ```
-
-4. **Run**:
-   ```bash
-   npm run dev
-   ```
+| Principle | How |
+|-----------|-----|
+| **Reduce overwhelm** | Show only what matters today |
+| **No deadlines** | Target dates are soft, not punishing |
+| **Effort-based** | Tasks have hours, not due dates |
+| **Calm UI** | Minimal, quiet, no gamification |
 
 ---
 
-### 🛠️ Tech Stack
-- **Framework**: Next.js 15 (App Router)
-- **AI**: Anthropic Claude 3.5 Sonnet
-- **Database**: Prisma + SQLite
-- **Styling**: Tailwind CSS
+## Quick Start
+
+```bash
+npm install
+npm run dev
+```
+
+Add your API key in `.env.local`:
+```env
+GEMINI_API_KEY=your_key_here
+```
 
 ---
 
-Built with ❤️ for a calmer, more productive life.
+## Tech Stack
+
+- **Next.js 15** (App Router)
+- **IndexedDB** (local-first, offline-capable)
+- **Gemini AI** (task decomposition)
+
+---
+
+Built for overwhelmed humans who still want to move forward.
