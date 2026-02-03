@@ -45,6 +45,7 @@ interface TaskItem {
     title: string;
     originalTitle: string;
     estimatedTotalMinutes: number;
+    whyThisMatters?: string;  // Quality: encouragement about what this unlocks
     workUnits: Array<{
         id: string; // Temp ID for React keys
         title: string;
@@ -132,6 +133,7 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                     title: t.title || t.content || 'Untitled Task',
                     originalTitle: t.title || t.content || 'Untitled Task',
                     estimatedTotalMinutes: t.estimatedTotalMinutes || 120,
+                    whyThisMatters: t.whyThisMatters,  // Quality: encouragement
                     workUnits: [],
                     isEditing: false
                 }))
@@ -609,22 +611,38 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                             </div>
                             <div className="p-3 space-y-2">
                                 {task.workUnits.map((unit) => (
-                                    <div key={unit.id} className="flex items-center gap-3 p-2 bg-white border border-gray-100 rounded-lg">
-                                        <div className="w-1.5 h-8 bg-indigo-100 rounded-full" />
-                                        <div className="flex-1 min-w-0">
-                                            <input
-                                                value={unit.title}
-                                                onChange={(e) => {
-                                                    const newTitle = e.target.value;
-                                                    setTasks(prev => prev.map(t =>
-                                                        t.id === task.id
-                                                            ? { ...t, workUnits: t.workUnits.map(u => u.id === unit.id ? { ...u, title: newTitle } : u) }
-                                                            : t
-                                                    ));
-                                                }}
-                                                className="w-full text-sm font-medium text-foreground bg-transparent border-none focus:ring-0 p-0"
-                                            />
-                                            <p className="text-xs text-muted mt-0.5 capitalize">{unit.kind} · {unit.estimatedTotalMinutes}m</p>
+                                    <div key={unit.id} className="p-3 bg-white border border-gray-100 rounded-lg">
+                                        <div className="flex items-start gap-3">
+                                            <div className="w-1.5 h-8 bg-indigo-100 rounded-full flex-shrink-0 mt-1" />
+                                            <div className="flex-1 min-w-0">
+                                                <input
+                                                    value={unit.title}
+                                                    onChange={(e) => {
+                                                        const newTitle = e.target.value;
+                                                        setTasks(prev => prev.map(t =>
+                                                            t.id === task.id
+                                                                ? { ...t, workUnits: t.workUnits.map(u => u.id === unit.id ? { ...u, title: newTitle } : u) }
+                                                                : t
+                                                        ));
+                                                    }}
+                                                    className="w-full text-sm font-medium text-foreground bg-transparent border-none focus:ring-0 p-0"
+                                                />
+                                                <p className="text-xs text-muted mt-0.5 capitalize">{unit.kind} · {unit.estimatedTotalMinutes}m</p>
+
+                                                {/* Quality guidance fields */}
+                                                {unit.firstAction && (
+                                                    <p className="text-xs text-green-700 mt-2 flex items-start gap-1">
+                                                        <span>→</span>
+                                                        <span>Start: {unit.firstAction}</span>
+                                                    </p>
+                                                )}
+                                                {unit.successSignal && (
+                                                    <p className="text-xs text-blue-700 mt-1 flex items-start gap-1">
+                                                        <span>✓</span>
+                                                        <span>Done when: {unit.successSignal}</span>
+                                                    </p>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -698,6 +716,11 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                                     Est. {task.estimatedTotalMinutes} mins
                                 </span>
                             </div>
+                            {task.whyThisMatters && (
+                                <p className="text-xs text-indigo-600 mt-2">
+                                    {task.whyThisMatters}
+                                </p>
+                            )}
                         </div>
                         <button onClick={() => handleRemoveTask(task.id)} className="text-muted/40 hover:text-red-500">
                             <CloseIcon size={16} />

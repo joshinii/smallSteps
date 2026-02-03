@@ -329,13 +329,27 @@ function SliceCard({ slice, onComplete, onSkip, compact }: SliceCardProps) {
         <div className={`bg-white border border-gray-200 rounded-xl transition-all ${compact ? 'p-3' : 'p-4'
             }`}>
             <div className="flex justify-between items-start">
-                <div>
+                <div className="flex-1">
                     <p className={`font-medium ${compact ? 'text-sm' : 'text-base'}`}>
                         {slice.workUnit.title}
                     </p>
                     <p className="text-xs text-muted mt-1">
                         {slice.label} · {slice.minutes} min · {slice.task.title}
                     </p>
+
+                    {/* Quality guidance - show first action and success signal */}
+                    {!compact && slice.workUnit.firstAction && (
+                        <p className="text-sm text-gray-600 mt-3 flex items-start gap-2">
+                            <span className="text-green-600 flex-shrink-0">→</span>
+                            <span>Start: {slice.workUnit.firstAction}</span>
+                        </p>
+                    )}
+                    {!compact && slice.workUnit.successSignal && (
+                        <p className="text-sm text-gray-500 mt-1 flex items-start gap-2">
+                            <span className="text-blue-600 flex-shrink-0">✓</span>
+                            <span>Done when: {slice.workUnit.successSignal}</span>
+                        </p>
+                    )}
                 </div>
             </div>
 
@@ -345,13 +359,13 @@ function SliceCard({ slice, onComplete, onSkip, compact }: SliceCardProps) {
                         onClick={onComplete}
                         className="px-4 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
                     >
-                        Complete
+                        Done
                     </button>
                     <button
                         onClick={onSkip}
                         className="ml-auto px-3 py-1.5 text-muted/60 hover:text-muted rounded-lg transition-colors text-sm"
                     >
-                        Defer
+                        Not today
                     </button>
                 </div>
             )}
