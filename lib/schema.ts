@@ -22,9 +22,12 @@ export interface Goal {
 }
 
 /**
- * Task - Effort Container
- * A finite body of work under a goal.
+ * Task - Effort Container (Milestone)
+ * A finite body of work under a goal representing an achievable milestone.
  * Tasks are NOT scheduled, NOT shown daily.
+ *
+ * Quality Fields:
+ * - whyThisMatters: Brief encouragement about what completing this unlocks
  */
 export interface Task {
     id: string;
@@ -33,6 +36,7 @@ export interface Task {
     estimatedTotalMinutes: number;
     completedMinutes: number;
     order: number;
+    whyThisMatters?: string; // Encouragement/motivation for this milestone
     createdAt: string;
     updatedAt: string;
 }
@@ -42,6 +46,10 @@ export interface Task {
  * Defines how work happens inside a task.
  * WorkUnits are reusable and sliceable.
  * Progress is tracked here.
+ *
+ * Quality Fields (for Gentle Architect philosophy):
+ * - firstAction: Tiny immediate step to reduce activation energy
+ * - successSignal: Observable sign that this unit is complete
  */
 export type WorkUnitKind = 'study' | 'practice' | 'build' | 'review' | 'explore';
 
@@ -53,6 +61,8 @@ export interface WorkUnit {
     completedMinutes: number;
     kind: WorkUnitKind;
     capabilityId?: string; // Canonical identifier for deduplication
+    firstAction?: string;  // Tiny first step (startable in <2 min)
+    successSignal?: string; // How user knows they're done
     createdAt: string;
     updatedAt: string;
 }

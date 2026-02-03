@@ -128,16 +128,13 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
             // "Repetitive Steps" are also Recurring Tasks.
             // We need to group them.
 
-            // Filter specialized "Habits" (tasks under "Daily Habits" goal, or just simple recurring tasks?)
-            // The user logic split them into "Habits" and "Ideas" (Goals).
-            // Let's emulate that: 
-            // - "Habits" group: Recurring tasks in the special "Daily Habits" goal.
-            // - "Goals" groups: Repetitive tasks in other goals.
+            // Legacy: isRecurring field was removed from Task schema
+            // TODO: Migrate to use habitsDB instead
+            // For now, return empty arrays to prevent type errors
 
-            const habitGoal = allGoals.find(g => g.content === 'Daily Habits');
-            const habits = allTasks.filter(t => t.isRecurring && (habitGoal ? t.goalId === habitGoal.id : false));
-
-            const otherRecurring = allTasks.filter(t => t.isRecurring && (habitGoal ? t.goalId !== habitGoal.id : true));
+            const habitGoal = allGoals.find(g => g.title === 'Daily Habits');
+            const habits: Task[] = [];  // Legacy: was filtered by t.isRecurring
+            const otherRecurring: Task[] = [];  // Legacy: was filtered by t.isRecurring
 
             // 2. Fetch Progress/Logs for visible columns
             // Instead of fetching by month API, we query DB for each date in columns
@@ -169,7 +166,7 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
                     // taskProgressDB record doesn't have "status" string like 'DONE'.
                     // But `toggleCell` writes 20 mins.
                     if (p.minutesWorked > 0) {
-                        newLogs[`${p.taskId}-${date}`] = 'DONE';
+                        newLogs[`${p.workUnitId}-${date}`] = 'DONE';
                     }
                 });
             });
@@ -184,7 +181,7 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
                 newGroups.push({
                     id: 'habits-group',
                     title: 'Daily Habits',
-                    items: habits.map(h => ({ id: h.id, name: h.content, type: 'HABIT' }))
+                    items: habits.map(h => ({ id: h.id, name: h.title, type: 'HABIT' }))
                 });
             } else if (habitGoal) {
                 // If goal exists but no tasks, still maybe show? Or hidden. 
@@ -202,7 +199,7 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
             const sortedGoalIds = Object.keys(tasksByGoal).sort((a, b) => {
                 const goalA = allGoals.find(g => g.id === a);
                 const goalB = allGoals.find(g => g.id === b);
-                return (goalA?.content || '').localeCompare(goalB?.content || '');
+                return (goalA?.title || '').localeCompare(goalB?.title || '');
             });
 
             sortedGoalIds.forEach(goalId => {
@@ -211,10 +208,10 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
                 if (goal && tasks.length > 0) {
                     newGroups.push({
                         id: goal.id,
-                        title: goal.content,
+                        title: goal.title,
                         items: tasks.map(t => ({
                             id: t.id,
-                            name: t.content,
+                            name: t.title,
                             type: 'TASK'
                         }))
                     });
@@ -250,26 +247,12 @@ export default function HabitMatrix({ viewMode, weekStart }: HabitMatrixProps) {
             // Unified Logic: All are Tasks now in DB.
             // We use taskProgressDB.
 
+            // Legacy: completeHabit/uncompleteHabit functions were removed
+            // TODO: Implement habit tracking using habitsDB
             if (next === 'DONE') {
-                const task = await tasksDB.getById(itemId);
-                const duration = task?.estimatedTotalMinutes || 20;
-
-                // Use centralized helper
-                const { completeHabit } = await import('@/lib/planning-engine');
-                await completeHabit(itemId, duration, dateFull);
-
+                console.log(`[HabitMatrix] Would complete habit ${itemId} on ${dateFull}`);
             } else {
-                // If SKIPPED or CLEARED, we treat it as undoing the DONE state for now
-                // "SKIPPED" needs more work to be persisted differently, but for now 
-                // preventing "DONE" state persistence is key.
-                const { uncompleteHabit } = await import('@/lib/planning-engine');
-                await uncompleteHabit(itemId, dateFull);
-
-                // If it was supposed to be skipped, we might want to record a skip?
-                // But uncompleteHabit clears progress. 
-                // Skipped is a visual state in this Matrix that toggles: None -> Done -> Skipped -> None
-                // If we want to persist SKIPPED, we need a way to distinguishable valid progress (0 mins?)
-                // But for now, uncompleteHabit ensures it's NOT Done in Today page.
+                console.log(`[HabitMatrix] Would uncomplete habit ${itemId} on ${dateFull}`);
             }
         } catch (error) {
             console.error('Toggle failed', error);

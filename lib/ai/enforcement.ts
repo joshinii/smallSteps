@@ -1,15 +1,20 @@
 // SmallSteps AI Response Enforcement
 // Centralized enforcement logic for all AI providers
+// Includes quality validation for Gentle Architect philosophy
 
 export interface AITask {
     title: string;
     estimatedTotalMinutes: number;
+    whyThisMatters?: string;
 }
 
 export interface AIWorkUnit {
     title: string;
     kind: string;
     estimatedTotalMinutes: number;
+    capabilityId?: string;
+    firstAction?: string;
+    successSignal?: string;
 }
 
 export interface DecomposeGoalResult {
@@ -20,9 +25,41 @@ export interface DecomposeTaskResult {
     workUnits: AIWorkUnit[];
 }
 
+// Words that indicate vague, non-actionable tasks
+const VAGUE_WORDS = ['basics', 'fundamentals', 'introduction', 'overview', 'general', 'misc', 'various'];
+
+// Quality assessment helpers
+function isVagueTitle(title: string): boolean {
+    const lower = title.toLowerCase();
+    return VAGUE_WORDS.some(word => lower.includes(word));
+}
+
+function generateDefaultFirstAction(title: string, kind: string): string {
+    const actions: Record<string, string> = {
+        'explore': `Search for resources about "${title.substring(0, 30)}..."`,
+        'study': `Open your learning material and read for 5 minutes`,
+        'practice': `Set a timer for 10 minutes and begin`,
+        'build': `Create a new file or workspace for this`,
+        'review': `Open your notes from the previous session`,
+    };
+    return actions[kind] || 'Take 2 minutes to gather what you need to start';
+}
+
+function generateDefaultSuccessSignal(title: string, kind: string): string {
+    const signals: Record<string, string> = {
+        'explore': 'You have found and saved useful resources',
+        'study': 'You can explain the main concept in your own words',
+        'practice': 'You can do it without looking at instructions',
+        'build': 'You have a working version you can show',
+        'review': 'You feel confident about what you learned',
+    };
+    return signals[kind] || 'You feel ready to move on to the next step';
+}
+
 /**
  * Parse AI response text, handling markdown code blocks
  */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 export function parseAIResponse(text: string): any {
     const jsonText = text.includes('```json')
         ? text.split('```json')[1].split('```')[0].trim()
@@ -34,18 +71,29 @@ export function parseAIResponse(text: string): any {
 }
 
 /**
- * Enforce minimum task minutes (Stage 1)
+ * Enforce minimum task minutes and quality (Stage 1)
+ * - Ensures minimum effort per task (now 60 min for flexibility)
+ * - Improves vague titles with suggestions
+ * - Preserves whyThisMatters field
  */
 export function enforceTaskMinimums(tasks: AITask[]): AITask[] {
-    return tasks.map(task => {
+    return tasks.map((task) => {
         let minutes = task.estimatedTotalMinutes || 120;
-        // Enforce meaningful chunks (minimum 120 min)
-        if (minutes < 120) minutes = 120;
+        // Enforce meaningful chunks (minimum 60 min for smaller goals)
+        if (minutes < 60) minutes = 60;
+
+        const title = task.title || 'Untitled Task';
+
+        // Quality: Flag vague titles (log for monitoring, but keep AI's title)
+        if (isVagueTitle(title)) {
+            console.log(`[Quality] Task "${title}" may be vague - consider more specific wording`);
+        }
 
         return {
             ...task,
-            title: task.title || 'Untitled Task',
-            estimatedTotalMinutes: minutes
+            title,
+            estimatedTotalMinutes: minutes,
+            whyThisMatters: task.whyThisMatters || undefined
         };
     });
 }
@@ -68,16 +116,36 @@ export function processGoalDecomposition(rawText: string): string {
 /**
  * Process Task Decomposition (Stage 2)
  * Normalizes work unit times to match the expected task total length.
+ * Enhances quality by ensuring firstAction and successSignal are present.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export function processTaskDecomposition(rawText: string, expectedTotal?: number): string {
     try {
         const parsed = parseAIResponse(rawText);
-        let workUnits = (parsed.workUnits || []).map((u: any) => ({
-            title: u.title || 'Activity',
-            kind: u.kind || 'practice', // Default kind
-            estimatedTotalMinutes: u.estimatedTotalMinutes || 60,
-            capabilityId: u.capabilityId
-        }));
+        let workUnits = ((parsed.workUnits as unknown[]) || []).map((u: any) => {
+            const kind = u.kind || 'practice';
+            const title = u.title || 'Activity';
+
+            // Quality: Ensure firstAction exists (generate default if missing)
+            const firstAction = u.firstAction || generateDefaultFirstAction(title, kind);
+
+            // Quality: Ensure successSignal exists (generate default if missing)
+            const successSignal = u.successSignal || generateDefaultSuccessSignal(title, kind);
+
+            // Quality: Log vague titles for monitoring
+            if (isVagueTitle(title)) {
+                console.log(`[Quality] WorkUnit "${title}" may be vague - consider more specific wording`);
+            }
+
+            return {
+                title,
+                kind,
+                estimatedTotalMinutes: u.estimatedTotalMinutes || 60,
+                capabilityId: u.capabilityId,
+                firstAction,
+                successSignal
+            };
+        });
 
         // Normalize if expectedTotal is provided
         if (expectedTotal && workUnits.length > 0) {
@@ -107,10 +175,6 @@ export function processTaskDecomposition(rawText: string, expectedTotal?: number
                 workUnits.sort((a: any, b: any) => b.estimatedTotalMinutes - a.estimatedTotalMinutes);
                 workUnits[0].estimatedTotalMinutes += diff;
             }
-        }
-
-        if (expectedTotal && workUnits.length > 0) {
-            // ... (normalization logic) ...
         }
 
         // Enforce Hard Cap of 120 mins per unit
@@ -143,3 +207,4 @@ export function processTaskDecomposition(rawText: string, expectedTotal?: number
         return JSON.stringify({ workUnits: [] });
     }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */

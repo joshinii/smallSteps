@@ -41,16 +41,17 @@ export class ClaudeAdapter implements AIProvider {
 
     async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string): Promise<GoalPlan> {
         try {
-            // New prompt architecture doesn't use userFeedback/isLifelong/traceId in the same way yet, 
+            // New prompt architecture doesn't use userFeedback/isLifelong/traceId in the same way yet,
             // but we keep signature for compatibility.
             const resultString = await this.callAPI('decomposeGoal', { goalText, targetDate });
             const parsed = JSON.parse(resultString);
 
             return {
-                rationale: parsed.rationale, // Might be undefined in new schema, that's optional in interface
+                rationale: parsed.rationale,
                 tasks: (parsed.tasks || []).map((t: any) => ({
                     title: t.title || t.content,
                     estimatedTotalMinutes: t.estimatedTotalMinutes || t.estimatedMinutes || 120,
+                    whyThisMatters: t.whyThisMatters // Pass through quality field
                 }))
             };
         } catch (error) {
@@ -68,7 +69,10 @@ export class ClaudeAdapter implements AIProvider {
                 workUnits: (parsed.workUnits || []).map((u: any) => ({
                     title: u.title,
                     kind: u.kind || 'practice',
-                    estimatedTotalMinutes: u.estimatedTotalMinutes || 60
+                    estimatedTotalMinutes: u.estimatedTotalMinutes || 60,
+                    capabilityId: u.capabilityId,
+                    firstAction: u.firstAction,   // Pass through quality field
+                    successSignal: u.successSignal // Pass through quality field
                 }))
             };
         } catch (error) {

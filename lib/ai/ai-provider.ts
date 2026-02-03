@@ -5,6 +5,7 @@
 export interface TaskSuggestion {
     title: string;
     estimatedTotalMinutes: number;
+    whyThisMatters?: string; // Encouragement about what this milestone unlocks
     // Legacy support (will be phased out or handled in enforcement)
     content?: string;
 }
@@ -14,6 +15,8 @@ export interface WorkUnitSuggestion {
     kind: 'study' | 'practice' | 'build' | 'review' | 'explore';
     estimatedTotalMinutes: number;
     capabilityId?: string;
+    firstAction?: string;  // Tiny first step (startable in <2 min)
+    successSignal?: string; // How user knows they're done
 }
 
 export interface GoalPlan {
@@ -62,6 +65,7 @@ export interface AIProvider {
 
 /**
  * Fallback provider when no AI is available
+ * Generates simple, encouraging defaults following Gentle Architect philosophy
  */
 export class ManualProvider implements AIProvider {
     readonly name = 'manual';
@@ -73,20 +77,43 @@ export class ManualProvider implements AIProvider {
 
     async decomposeGoal(goalText: string): Promise<GoalPlan> {
         return {
-            rationale: 'Manual fallback.',
+            rationale: 'Simple starting structure - you can edit these milestones.',
             tasks: [
-                { title: 'Task 1', estimatedTotalMinutes: 120 },
-                { title: 'Task 2', estimatedTotalMinutes: 180 },
+                {
+                    title: 'Get started with first steps',
+                    estimatedTotalMinutes: 120,
+                    whyThisMatters: 'Building momentum with early wins'
+                },
+                {
+                    title: 'Build on your progress',
+                    estimatedTotalMinutes: 180,
+                    whyThisMatters: 'Taking what you learned further'
+                },
             ],
         };
     }
 
     async decomposeTask(taskTitle: string, taskTotalMinutes: number, otherTasks?: string[], priorCapabilities?: string[]): Promise<TaskPlan> {
-        // Simple heuristic fallback
+        // Simple heuristic fallback with quality fields
+        const firstHalf = Math.floor(taskTotalMinutes * 0.4);
+        const secondHalf = taskTotalMinutes - firstHalf;
+
         return {
             workUnits: [
-                { title: `Start ${taskTitle}`, kind: 'practice', estimatedTotalMinutes: Math.floor(taskTotalMinutes * 0.4) },
-                { title: `Continue ${taskTitle}`, kind: 'build', estimatedTotalMinutes: Math.floor(taskTotalMinutes * 0.6) },
+                {
+                    title: `Begin ${taskTitle}`,
+                    kind: 'explore',
+                    estimatedTotalMinutes: firstHalf,
+                    firstAction: 'Gather your materials and find a comfortable spot',
+                    successSignal: 'You have a clear picture of what to do next'
+                },
+                {
+                    title: `Complete ${taskTitle}`,
+                    kind: 'build',
+                    estimatedTotalMinutes: secondHalf,
+                    firstAction: 'Pick up where you left off',
+                    successSignal: 'You can see tangible progress from your effort'
+                },
             ]
         };
     }
@@ -95,7 +122,7 @@ export class ManualProvider implements AIProvider {
         return {
             estimatedTotalMinutes: 600,
             confidence: 'low',
-            rationale: 'Manual fallback'
+            rationale: 'A reasonable starting estimate - adjust based on your experience'
         };
     }
 }

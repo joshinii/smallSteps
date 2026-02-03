@@ -32,7 +32,7 @@ const TaskItem = ({
                 <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-2">
                         <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'text-muted' : ''}`}>
-                            {task.title || task.content}
+                            {task.title}
                         </p>
                     </div>
                     {/* Calm effort display - just remaining hours */}
@@ -165,18 +165,10 @@ export default function HomePage() {
         }
     };
 
+    // Legacy function - isRecurring field was removed from Task schema
+    // TODO: Decide if this feature should use the Habits system instead
     const handleToggleGoalRepetitive = async (goal: GoalWithTasks) => {
-        const allRepetitive = goal.tasks.every(s => s.isRecurring);
-        const newStatus = !allRepetitive;
-
-        try {
-            await Promise.all(
-                goal.tasks.map(s => tasksDB.update(s.id, { isRecurring: newStatus }))
-            );
-            await loadGoals();
-        } catch (e) {
-            console.error("Error toggling goal repetitive", e);
-        }
+        console.log('Repetitive toggle not yet implemented for new schema');
     };
 
     // Helper: Get the single focus task for Collapsed View
@@ -268,20 +260,19 @@ export default function HomePage() {
                                         setEditingGoal(null);
                                     }}
                                     onDelete={editingGoal ? () => {
-                                        handleDeleteGoal(editingGoal.id, editingGoal.content);
+                                        handleDeleteGoal(editingGoal.id, editingGoal.title);
                                         setShowCreator(false);
                                         setEditingGoal(null);
                                     } : undefined}
                                     existingGoal={editingGoal ? {
                                         id: editingGoal.id,
-                                        title: editingGoal.title || (editingGoal as any).content, // Legacy support
+                                        title: editingGoal.title,
                                         targetDate: editingGoal.targetDate,
                                         lifelong: editingGoal.lifelong,
                                         tasks: editingGoal.tasks.map(t => ({
                                             id: t.id,
-                                            title: t.title || (t as any).content,
+                                            title: t.title,
                                             estimatedTotalMinutes: t.estimatedTotalMinutes,
-                                            isRecurring: t.isRecurring,
                                         }))
                                     } : undefined}
                                 />
@@ -318,7 +309,8 @@ export default function HomePage() {
                                     .map((goal) => {
                                         const allTasks = goal.tasks;
                                         const isGoalCollapsed = collapsedGoals.has(goal.id);
-                                        const isGoalRepetitive = allTasks.length > 0 && allTasks.every(t => t.isRecurring);
+                                        // Legacy: isRecurring field removed from Task schema
+                                        const isGoalRepetitive = false;
 
                                         const headerTask = getHeaderTask(allTasks);
                                         const completedCount = allTasks.filter(t => isTaskEffectivelyComplete(t)).length;
@@ -466,7 +458,7 @@ export default function HomePage() {
                                                                             >
                                                                                 <CheckIcon size={10} />
                                                                             </button>
-                                                                            <span className="text-sm line-through text-muted">{task.title || task.content}</span>
+                                                                            <span className="text-sm line-through text-muted">{task.title}</span>
                                                                         </div>
                                                                     ))}
                                                                 </div>

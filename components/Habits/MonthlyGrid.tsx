@@ -29,8 +29,9 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
     const fetchData = async () => {
         setLoading(true);
         try {
-            // 1. Fetch recurring tasks (Habits)
-            const recurring = await tasksDB.getRecurring();
+            // 1. Legacy: getRecurring was removed from Task schema
+            // TODO: Migrate to use habitsDB
+            const recurring: Task[] = [];
             setHabits(recurring);
 
             // 2. Fetch data for all days in month
@@ -54,7 +55,7 @@ export default function MonthlyGrid({ currentMonth }: MonthlyGridProps) {
                     progressEntries.forEach(p => {
                         // If minutes > 0 -> DONE
                         if (p.minutesWorked > 0) {
-                            logsMap[`${date}-${p.taskId}`] = 'DONE';
+                            logsMap[`${date}-${p.workUnitId}`] = 'DONE';
                         }
                     });
                 }

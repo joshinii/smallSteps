@@ -55,7 +55,7 @@ export default function DailyLog({ date, onSave }: DailyLogProps) {
         setSaving(true);
         try {
             // Save log locally
-            await dailyMomentsDB.save(date, moment);
+            await dailyMomentsDB.upsert(date, moment);
 
             // Trigger AI reflection if we have some data and haven't reflected yet
             // Only reflect if generic AI is configured or we want to try?

@@ -45,15 +45,15 @@ export default function JourneyPage() {
                     const goalTasks = allTasks.filter(t => t.goalId === goal.id);
                     const completedTasks = goalTasks.filter(t => isTaskEffectivelyComplete(t));
 
-                    // Include goals with completed tasks OR fully completed goals
-                    if (completedTasks.length > 0 || goal.status === 'completed') {
+                    // Include goals with completed tasks OR fully drained goals
+                    if (completedTasks.length > 0 || goal.status === 'drained') {
                         journeyGoals.push({
                             ...goal,
                             completedTasks: completedTasks.sort((a, b) =>
                                 new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
                             ),
                             totalTasks: goalTasks.length,
-                            isFullyCompleted: goal.status === 'completed'
+                            isFullyCompleted: goal.status === 'drained'
                         });
                     }
                 });
@@ -164,7 +164,7 @@ export default function JourneyPage() {
                                                     </div>
                                                 )}
                                                 <h2 className="text-lg font-medium text-foreground">
-                                                    {goal.content}
+                                                    {goal.title}
                                                 </h2>
                                             </div>
                                             <div className="flex items-center gap-3 text-xs text-muted">
@@ -202,7 +202,7 @@ export default function JourneyPage() {
 
                                                     <div>
                                                         <p className="text-sm text-foreground leading-relaxed">
-                                                            {task.content}
+                                                            {task.title}
                                                         </p>
                                                         <p className="text-xs text-muted mt-0.5">
                                                             {new Date(task.updatedAt).toLocaleDateString('en-US', {
