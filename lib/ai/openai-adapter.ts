@@ -1,7 +1,7 @@
 // SmallSteps OpenAI Adapter
 // Implements AIProvider interface using server-side API route
 
-import type { AIProvider, GoalPlan, TaskPlan, EffortEstimate } from './ai-provider';
+import type { AIProvider, GoalPlan, TaskPlan, EffortEstimate, ClarificationQuestion, ClarificationResult } from './ai-provider';
 
 export class OpenAIAdapter implements AIProvider {
     readonly name = 'openai';
@@ -38,9 +38,32 @@ export class OpenAIAdapter implements AIProvider {
         return data.result;
     }
 
-    async decomposeGoal(goalText: string, targetDate?: string): Promise<GoalPlan> {
+    async clarifyGoal(goalText: string, traceId?: string): Promise<ClarificationQuestion[]> {
         try {
-            const resultString = await this.callAPI('decomposeGoal', { goalText, targetDate });
+            const resultString = await this.callAPI('clarifyGoal', { goalText, traceId });
+            const parsed = JSON.parse(resultString);
+
+            const questions = parsed.questions || [];
+            return questions.slice(0, 3).map((q: any) => ({
+                id: q.id || `q_${Math.random().toString(36).slice(2)}`,
+                questionText: q.questionText,
+                planningDimension: q.planningDimension || 'scope',
+                options: (q.options || []).map((o: any) => ({
+                    value: o.value,
+                    label: o.label,
+                    planningHint: o.planningHint
+                }))
+            }));
+        } catch (error) {
+            console.error('OpenAI clarifyGoal error:', error);
+            throw error;
+        }
+    }
+
+    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string, clarificationContext?: ClarificationResult): Promise<GoalPlan> {
+        try {
+            const clarificationPayload = clarificationContext?.planningContext || undefined;
+            const resultString = await this.callAPI('decomposeGoal', { goalText, targetDate, clarificationContext: clarificationPayload });
             const parsed = JSON.parse(resultString);
 
             return {

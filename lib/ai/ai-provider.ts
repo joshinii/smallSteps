@@ -1,6 +1,46 @@
 // SmallSteps AI Provider Interface
 // Pluggable adapter system for Claude, Gemini, and OpenAI
-// Two-stage decomposition: Goal → Tasks → WorkUnits
+// Three-stage flow: Goal Clarification → Tasks → WorkUnits
+
+/**
+ * Clarification Question - Reduces ambiguity before decomposition
+ * Each question maps to planning constraints
+ */
+export interface ClarificationQuestion {
+    id: string;
+    questionText: string;
+    planningDimension: 'scope' | 'skill' | 'time' | 'rhythm' | 'priority';
+    options: Array<{
+        value: string;
+        label: string;
+        planningHint?: string;  // How this affects task generation
+    }>;
+}
+
+/**
+ * User's answer to a clarification question
+ */
+export interface ClarificationAnswer {
+    questionId: string;
+    selectedValue: string;
+    isCustom: boolean;
+    customText?: string;
+}
+
+/**
+ * Result of clarification step - context for decomposition
+ */
+export interface ClarificationResult {
+    questions: ClarificationQuestion[];
+    answers: ClarificationAnswer[];
+    planningContext: {
+        scopeHint?: string;      // e.g., "just basics" vs "mastery"
+        skillLevel?: string;     // e.g., "complete beginner" vs "some experience"
+        timeCommitment?: string; // e.g., "15 min/day" vs "a few hours/week"
+        preferredRhythm?: string; // e.g., "daily habit" vs "weekend blocks"
+        priorityLevel?: string;  // e.g., "main focus" vs "side project"
+    };
+}
 
 export interface TaskSuggestion {
     title: string;
@@ -43,9 +83,16 @@ export interface AIProvider {
     readonly displayName: string;
 
     /**
-     * Stage 1: Decompose Goal into Tasks
+     * Stage 0: Generate clarification questions for a goal
+     * Returns exactly 3 questions to reduce ambiguity before decomposition
      */
-    decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string): Promise<GoalPlan>;
+    clarifyGoal(goalText: string, traceId?: string): Promise<ClarificationQuestion[]>;
+
+    /**
+     * Stage 1: Decompose Goal into Tasks
+     * Now accepts optional clarification context for better planning
+     */
+    decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string, clarificationContext?: ClarificationResult): Promise<GoalPlan>;
 
     /**
      * Stage 2: Decompose Task into WorkUnits
@@ -73,6 +120,48 @@ export class ManualProvider implements AIProvider {
 
     async validateApiKey(): Promise<boolean> {
         return true;
+    }
+
+    async clarifyGoal(goalText: string): Promise<ClarificationQuestion[]> {
+        // Manual mode: return default clarification questions
+        return [
+            {
+                id: 'scope',
+                questionText: 'What would feel like success for this goal?',
+                planningDimension: 'scope',
+                options: [
+                    { value: 'basics', label: 'Get the basics down', planningHint: 'Focus on fundamentals' },
+                    { value: 'functional', label: 'Be functional / practical', planningHint: 'Focus on practical skills' },
+                    { value: 'confident', label: 'Feel genuinely confident', planningHint: 'Build depth and confidence' },
+                    { value: 'advanced', label: 'Reach an advanced level', planningHint: 'Include challenging material' },
+                    { value: 'custom', label: 'Not sure / Custom', planningHint: 'Balanced approach' },
+                ],
+            },
+            {
+                id: 'experience',
+                questionText: 'Where are you starting from?',
+                planningDimension: 'skill',
+                options: [
+                    { value: 'zero', label: 'Complete beginner', planningHint: 'Start from scratch' },
+                    { value: 'dabbled', label: 'Dabbled a bit before', planningHint: 'Quick review then progress' },
+                    { value: 'some', label: 'Some real experience', planningHint: 'Skip basics, build on existing' },
+                    { value: 'rusty', label: 'Know it but rusty', planningHint: 'Focus on refreshing' },
+                    { value: 'custom', label: 'Not sure / Custom', planningHint: 'Start with assessment' },
+                ],
+            },
+            {
+                id: 'rhythm',
+                questionText: 'What pace feels sustainable?',
+                planningDimension: 'rhythm',
+                options: [
+                    { value: 'tiny', label: '10-15 minutes daily', planningHint: 'Very small daily chunks' },
+                    { value: 'moderate', label: '30 minutes daily', planningHint: 'Moderate daily practice' },
+                    { value: 'focused', label: 'A few longer sessions/week', planningHint: 'Bigger weekly blocks' },
+                    { value: 'intensive', label: 'Deep dives when I can', planningHint: 'Flexible intensive sessions' },
+                    { value: 'custom', label: 'Not sure / Custom', planningHint: 'Adaptable schedule' },
+                ],
+            },
+        ];
     }
 
     async decomposeGoal(goalText: string): Promise<GoalPlan> {

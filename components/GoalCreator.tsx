@@ -9,7 +9,7 @@ import { useAI, useAIWithFallback } from '@/lib/ai/AIContext';
 import { useToast } from '@/lib/ToastContext';
 import { goalsDB, tasksDB, workUnitsDB } from '@/lib/db';
 import { generateId, formatDisplayDate, formatEffortDisplay } from '@/lib/utils';
-import type { TaskSuggestion, GoalPlan } from '@/lib/ai/ai-provider';
+import type { TaskSuggestion, GoalPlan, ClarificationQuestion, ClarificationAnswer, ClarificationResult } from '@/lib/ai/ai-provider';
 import { DragHandleIcon, CloseIcon, SparklesIcon } from '@/components/icons';
 import { assessTargetDateFeasibility, suggestTargetDate, reassessDailyPlans, assessTotalWorkload, assessGoalAdmission, type FeasibilityResult } from '@/lib/planning-engine';
 import { logger, generateTraceId } from '@/lib/logger';
@@ -31,7 +31,7 @@ interface GoalCreatorProps {
     };
 }
 
-type Step = 'input' | 'processing' | 'review' | 'generating-units' | 'review-units' | 'saving';
+type Step = 'input' | 'clarifying' | 'clarify-questions' | 'processing' | 'review' | 'generating-units' | 'review-units' | 'saving';
 
 interface EditableTask extends TaskSuggestion {
     id: string;
@@ -88,12 +88,155 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
     const [workloadWarning, setWorkloadWarning] = useState<string | null>(null);
     const [traceId] = useState(generateTraceId());
 
+    // Clarification state
+    const [clarificationQuestions, setClarificationQuestions] = useState<ClarificationQuestion[]>([]);
+    const [clarificationAnswers, setClarificationAnswers] = useState<ClarificationAnswer[]>([]);
+    const [clarificationResult, setClarificationResult] = useState<ClarificationResult | null>(null);
+
     const { openSetupModal, isConfigured, provider } = useAI();
     const { getAIOrPrompt } = useAIWithFallback();
     const { showToast } = useToast();
 
+    // Stage 0: Clarify Goal -> Questions
+    const handleStartClarification = async () => {
+        if (!goalText.trim()) {
+            setError('Please describe your goal');
+            return;
+        }
+
+        setError('');
+        setStep('clarifying');
+
+        try {
+            const { provider: aiProvider, needsSetup } = getAIOrPrompt();
+
+            if (needsSetup && provider === 'manual') {
+                // Manual mode - use default questions
+                const defaultQuestions = await aiProvider.clarifyGoal(goalText.trim(), traceId);
+                setClarificationQuestions(defaultQuestions);
+                setClarificationAnswers([]);
+                setStep('clarify-questions');
+                return;
+            } else if (needsSetup) {
+                openSetupModal();
+                setStep('input');
+                return;
+            }
+
+            logger.info('LOG.CLARIFICATION_STARTED', { goalText: goalText.substring(0, 50) }, { traceId, phase: 'clarification' });
+
+            let questions: ClarificationQuestion[];
+            try {
+                questions = await aiProvider.clarifyGoal(goalText.trim(), traceId);
+            } catch (aiError) {
+                console.warn('AI clarification failed, using defaults', aiError);
+                const { manualProvider } = await import('@/lib/ai/ai-provider');
+                questions = await manualProvider.clarifyGoal(goalText.trim());
+            }
+
+            // Ensure exactly 3 questions
+            if (questions.length < 3) {
+                console.warn('[GoalCreator] Fewer than 3 questions, using manual fallback');
+                const { manualProvider } = await import('@/lib/ai/ai-provider');
+                questions = await manualProvider.clarifyGoal(goalText.trim());
+            }
+
+            setClarificationQuestions(questions.slice(0, 3));
+            setClarificationAnswers([]);
+            setStep('clarify-questions');
+
+            logger.info('LOG.CLARIFICATION_QUESTIONS_GENERATED', {
+                questionCount: questions.length
+            }, { traceId, phase: 'clarification' });
+        } catch (err) {
+            console.error('Clarification error:', err);
+            setError('Could not generate questions. Continuing without clarification.');
+            // Fall through to decomposition
+            handleDecompose();
+        }
+    };
+
+    // Handle answer selection for a clarification question
+    const handleSelectAnswer = (questionId: string, value: string, isCustom: boolean, customText?: string) => {
+        setClarificationAnswers(prev => {
+            const existing = prev.findIndex(a => a.questionId === questionId);
+            const newAnswer: ClarificationAnswer = {
+                questionId,
+                selectedValue: value,
+                isCustom,
+                customText
+            };
+
+            if (existing >= 0) {
+                const updated = [...prev];
+                updated[existing] = newAnswer;
+                return updated;
+            }
+            return [...prev, newAnswer];
+        });
+    };
+
+    // Build planning context from answers
+    const buildPlanningContext = (): ClarificationResult => {
+        const planningContext: ClarificationResult['planningContext'] = {};
+
+        for (const answer of clarificationAnswers) {
+            const question = clarificationQuestions.find(q => q.id === answer.questionId);
+            if (!question) continue;
+
+            const selectedOption = question.options.find(o => o.value === answer.selectedValue);
+            const hint = answer.isCustom
+                ? (answer.customText || 'User prefers flexibility')
+                : (selectedOption?.planningHint || selectedOption?.label || answer.selectedValue);
+
+            switch (question.planningDimension) {
+                case 'scope':
+                    planningContext.scopeHint = hint;
+                    break;
+                case 'skill':
+                    planningContext.skillLevel = hint;
+                    break;
+                case 'time':
+                    planningContext.timeCommitment = hint;
+                    break;
+                case 'rhythm':
+                    planningContext.preferredRhythm = hint;
+                    break;
+                case 'priority':
+                    planningContext.priorityLevel = hint;
+                    break;
+            }
+        }
+
+        return {
+            questions: clarificationQuestions,
+            answers: clarificationAnswers,
+            planningContext
+        };
+    };
+
+    // Continue after clarification
+    const handleContinueAfterClarification = () => {
+        const result = buildPlanningContext();
+        setClarificationResult(result);
+
+        logger.info('LOG.CLARIFICATION_COMPLETED', {
+            answeredCount: clarificationAnswers.length,
+            planningContext: result.planningContext
+        }, { traceId, phase: 'clarification' });
+
+        handleDecompose(undefined, result);
+    };
+
+    // Skip clarification entirely
+    const handleSkipClarification = () => {
+        logger.info('LOG.CLARIFICATION_SKIPPED', {}, { traceId, phase: 'clarification' });
+        setClarificationResult(null);
+        handleDecompose();
+    };
+
     // Stage 1: Decompose Goal -> Tasks
-    const handleDecompose = async (userFeedback?: string) => {
+    const handleDecompose = async (userFeedback?: string, clarification?: ClarificationResult) => {
         if (!goalText.trim()) {
             setError('Please describe your goal');
             return;
@@ -114,9 +257,12 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                 return;
             }
 
+            // Use passed clarification or existing state
+            const effectiveClarification = clarification || clarificationResult || undefined;
+
             let plan: GoalPlan;
             try {
-                plan = await aiProvider.decomposeGoal(goalText.trim(), targetDate || undefined, userFeedback, isLifelong, traceId);
+                plan = await aiProvider.decomposeGoal(goalText.trim(), targetDate || undefined, userFeedback, isLifelong, traceId, effectiveClarification);
             } catch (aiError) {
                 console.warn('AI failed, falling back to manual', aiError);
                 showToast("AI connection failed. Switched to manual mode.", "calm-alert");
@@ -555,7 +701,7 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
 
                 <div className="flex flex-col gap-3 mt-6">
                     <button
-                        onClick={() => handleDecompose()}
+                        onClick={handleStartClarification}
                         disabled={!goalText.trim()}
                         className="w-full px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 disabled:opacity-50 font-medium flex items-center justify-center gap-2"
                     >
@@ -567,6 +713,86 @@ export default function GoalCreator({ onComplete, onCancel, onDelete, existingGo
                             Cancel
                         </button>
                     )}
+                </div>
+            </div>
+        );
+    }
+
+    if (step === 'clarifying') {
+        return (
+            <div className="bg-white border-2 border-gray-100 rounded-2xl p-8 text-center animate-fadeIn">
+                <div className="animate-pulse">
+                    <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-accent/20"></div>
+                    <p className="text-muted">Understanding your goal...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (step === 'clarify-questions') {
+        const allAnswered = clarificationAnswers.length === clarificationQuestions.length;
+
+        return (
+            <div className="bg-white border-2 border-gray-100 rounded-2xl p-6 animate-fadeIn">
+                <h2 className="text-xl font-light text-foreground mb-2">Quick questions</h2>
+                <p className="text-sm text-muted mb-6">Help us tailor your plan (optional)</p>
+
+                <div className="space-y-6">
+                    {clarificationQuestions.map((question, qIndex) => {
+                        const currentAnswer = clarificationAnswers.find(a => a.questionId === question.id);
+
+                        return (
+                            <div key={question.id} className="border border-gray-100 rounded-xl p-4">
+                                <p className="font-medium text-foreground mb-3">
+                                    {qIndex + 1}. {question.questionText}
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {question.options.map((option) => {
+                                        const isSelected = currentAnswer?.selectedValue === option.value;
+                                        const isCustomOption = option.value === 'custom';
+
+                                        return (
+                                            <button
+                                                key={option.value}
+                                                onClick={() => handleSelectAnswer(
+                                                    question.id,
+                                                    option.value,
+                                                    isCustomOption
+                                                )}
+                                                className={`px-3 py-2 text-sm rounded-lg border-2 transition-colors text-left ${
+                                                    isSelected
+                                                        ? 'border-accent bg-accent/10 text-foreground'
+                                                        : 'border-gray-100 text-muted hover:border-gray-200'
+                                                } ${isCustomOption ? 'col-span-2' : ''}`}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                    <button
+                        onClick={handleSkipClarification}
+                        className="px-6 py-3 text-muted border-2 border-gray-100 rounded-xl hover:border-gray-200"
+                    >
+                        Skip
+                    </button>
+                    <button
+                        onClick={handleContinueAfterClarification}
+                        className={`flex-1 px-6 py-3 rounded-xl font-medium flex items-center justify-center gap-2 ${
+                            allAnswered
+                                ? 'bg-foreground text-white hover:opacity-90'
+                                : 'bg-gray-100 text-foreground hover:bg-gray-200'
+                        }`}
+                    >
+                        <SparklesIcon size={16} />
+                        {allAnswered ? 'Continue' : 'Continue anyway'}
+                    </button>
                 </div>
             </div>
         );

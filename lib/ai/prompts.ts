@@ -1,23 +1,100 @@
 // SmallSteps AI Prompts
-// Two-stage decomposition: Goal → Tasks → WorkUnits
+// Three-stage flow: Goal Clarification → Tasks → WorkUnits
 // AI structures work, never schedules it
 // Philosophy: Gentle Architect - small, doable steps for overwhelmed users
+
+/**
+ * Stage 0: Generate Clarification Questions
+ * Exactly 3 questions to reduce ambiguity before task decomposition
+ * Questions should be answerable in under 5 seconds each
+ */
+export function getClarifyGoalPrompt(goalText: string): string {
+  return `You help people turn vague goals into clear, achievable plans. Before planning, you need to understand their intent better.
+
+Goal: "${goalText}"
+
+Generate exactly 3 clarifying questions to understand their needs. Each question should:
+1. Be answerable in under 5 seconds (quick selection, not typing)
+2. Reduce ambiguity that would affect planning (scope, skill level, time commitment, or rhythm)
+3. Use casual, friendly language (not clinical or corporate)
+4. Have 4-5 concrete options plus "Not sure / Custom"
+
+**PLANNING DIMENSIONS:**
+- scope: What depth/breadth of mastery they want
+- skill: Their current experience level
+- time: How much time they can commit
+- rhythm: Their preferred working pattern (daily habit vs occasional deep dives)
+- priority: How this fits into their life (main focus vs side project)
+
+**Output Format (JSON only):**
+{
+  "questions": [
+    {
+      "id": "unique_id",
+      "questionText": "Casual, friendly question?",
+      "planningDimension": "scope|skill|time|rhythm|priority",
+      "options": [
+        { "value": "option_key", "label": "Short, clear label", "planningHint": "How this affects planning" },
+        { "value": "custom", "label": "Not sure / Custom", "planningHint": "Balanced approach" }
+      ]
+    }
+  ]
+}
+
+**Quality Checks:**
+- Questions should feel like a friendly conversation, not an interview
+- Options must be mutually exclusive and cover the realistic range
+- Labels should be 2-6 words max (scannable)
+- The "Not sure / Custom" option is always last and always present
+- Avoid jargon: "What pace feels sustainable?" not "What's your weekly time allocation?"
+
+Return ONLY valid JSON with exactly 3 questions.`;
+}
+
+/**
+ * Format clarification context for decomposition prompt
+ */
+export interface ClarificationContext {
+  scopeHint?: string;
+  skillLevel?: string;
+  timeCommitment?: string;
+  preferredRhythm?: string;
+  priorityLevel?: string;
+}
+
+function formatClarificationContext(context?: ClarificationContext): string {
+  if (!context) return '';
+
+  const hints: string[] = [];
+  if (context.scopeHint) hints.push(`- Desired depth: ${context.scopeHint}`);
+  if (context.skillLevel) hints.push(`- Starting point: ${context.skillLevel}`);
+  if (context.timeCommitment) hints.push(`- Time available: ${context.timeCommitment}`);
+  if (context.preferredRhythm) hints.push(`- Preferred rhythm: ${context.preferredRhythm}`);
+  if (context.priorityLevel) hints.push(`- Priority: ${context.priorityLevel}`);
+
+  if (hints.length === 0) return '';
+
+  return `\n**User Context (from clarification):**\n${hints.join('\n')}\n`;
+}
 
 /**
  * Stage 1: Decompose Goal into Milestone Tasks
  * A Task represents a meaningful milestone - something the user can DO after completing it.
  * Focus on achievable chunks that build confidence.
  */
-export function getDecomposeGoalPrompt(goalText: string, targetDate?: string): string {
+export function getDecomposeGoalPrompt(goalText: string, targetDate?: string, clarificationContext?: ClarificationContext): string {
   const targetContext = targetDate
     ? `\nSoft target: ${new Date(targetDate).toLocaleDateString()} (a gentle guideline, not a deadline)`
     : '';
 
+  const userContext = formatClarificationContext(clarificationContext);
+
   return `You are a supportive guide helping someone break down their goal into achievable milestones.
 
-Goal: "${goalText}"${targetContext}
+Goal: "${goalText}"${targetContext}${userContext}
 
 Design 3-6 milestone tasks that build on each other. Each milestone should feel like a small win.
+${userContext ? '\n**Important:** Use the user context above to tailor task depth, starting point, and pacing.\n' : ''}
 
 **GUIDING PRINCIPLES:**
 1. **Achievable Milestones**: Each task title describes what the user CAN DO after completing it (e.g., "Play a complete simple song" not "Guitar basics").

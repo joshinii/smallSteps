@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import {
+    getClarifyGoalPrompt,
     getDecomposeGoalPrompt,
     getDecomposeTaskPrompt,
     getEstimateGoalEffortPrompt
@@ -29,9 +30,39 @@ export async function POST(request: NextRequest) {
         const client = new OpenAI({ apiKey: effectiveApiKey });
 
         switch (action) {
+            case 'clarifyGoal': {
+                const { goalText, traceId } = payload;
+                const prompt = getClarifyGoalPrompt(goalText);
+
+                const response = await client.chat.completions.create({
+                    model: DEFAULT_MODEL,
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: 0.4,
+                    max_tokens: 4096,
+                });
+
+                const text = response.choices[0]?.message?.content?.trim() || '';
+
+                let parsed;
+                try {
+                    const jsonText = text.includes('```json')
+                        ? text.split('```json')[1].split('```')[0].trim()
+                        : text.includes('```')
+                            ? text.split('```')[1].split('```')[0].trim()
+                            : text;
+                    parsed = JSON.parse(jsonText);
+                } catch {
+                    parsed = { questions: [] };
+                }
+
+                const questions = (parsed.questions || []).slice(0, 3);
+                console.log('[clarifyGoal] Generated', questions.length, 'questions for goal:', goalText.substring(0, 50), traceId ? `(trace: ${traceId})` : '');
+                return NextResponse.json({ result: JSON.stringify({ questions }) });
+            }
+
             case 'decomposeGoal': {
-                const { goalText, targetDate } = payload;
-                const prompt = getDecomposeGoalPrompt(goalText, targetDate);
+                const { goalText, targetDate, clarificationContext } = payload;
+                const prompt = getDecomposeGoalPrompt(goalText, targetDate, clarificationContext);
 
                 const response = await client.chat.completions.create({
                     model: DEFAULT_MODEL,
