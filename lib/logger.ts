@@ -19,7 +19,11 @@ export type LogEvent =
     | 'LOG.daily_plan_generation' // Lowercase to distinguish from system events? No, keep consistent.
     | 'LOG.DAILY_PLAN_GENERATION'
     | 'LOG.QUEUE_REHYDRATION'
-    | 'LOG.TASK_COMPLETION';
+    | 'LOG.TASK_COMPLETION'
+    | 'LOG.CLARIFICATION_STARTED'
+    | 'LOG.CLARIFICATION_QUESTIONS_GENERATED'
+    | 'LOG.CLARIFICATION_COMPLETED'
+    | 'LOG.CLARIFICATION_SKIPPED';
 
 export const logger = {
     info: (event: LogEvent, payload: Record<string, any>, context: LogContext) => {

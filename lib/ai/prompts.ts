@@ -1,26 +1,122 @@
 // SmallSteps AI Prompts
-// Two-stage decomposition: Goal → Tasks → WorkUnits
+// Three-stage flow: Goal Clarification → Tasks → WorkUnits
 // AI structures work, never schedules it
 // Philosophy: Gentle Architect - small, doable steps for overwhelmed users
+
+/**
+ * Stage 0: Generate Clarification Questions
+ * Exactly 3 questions to reduce ambiguity before task decomposition
+ * Questions should be answerable in under 5 seconds each
+ */
+export function getClarifyGoalPrompt(goalText: string): string {
+  return `You help people turn vague goals into clear, achievable plans. Before planning, you need to understand their intent better.
+
+Goal: "${goalText}"
+
+Generate exactly 3 clarifying questions to understand their needs. Each question MUST include an options array.
+
+**CRITICAL**: Each question MUST have an "options" array with 4-5 option objects. Without options, the output is invalid.
+
+**PLANNING DIMENSIONS:**
+- scope: What depth/breadth of mastery they want
+- skill: Their current experience level
+- time: How much time they can commit
+- rhythm: Their preferred working pattern (daily habit vs occasional deep dives)
+- priority: How this fits into their life (main focus vs side project)
+
+**Output Format (JSON only) - EACH QUESTION MUST HAVE OPTIONS:**
+{
+  "questions": [
+    {
+      "id": "q1",
+      "questionText": "Casual, friendly question?",
+      "planningDimension": "scope",
+      "options": [
+        { "value": "basic", "label": "Get the basics down", "planningHint": "Focus on fundamentals" },
+        { "value": "functional", "label": "Be functional", "planningHint": "Focus on practical use" },
+        { "value": "confident", "label": "Feel confident", "planningHint": "Build depth" },
+        { "value": "advanced", "label": "Reach advanced level", "planningHint": "Include challenging material" },
+        { "value": "custom", "label": "Not sure / Custom", "planningHint": "Balanced approach" }
+      ]
+    },
+    {
+      "id": "q2",
+      "questionText": "Another casual question?",
+      "planningDimension": "skill",
+      "options": [
+        { "value": "beginner", "label": "Complete beginner", "planningHint": "Start from scratch" },
+        { "value": "some", "label": "Some experience", "planningHint": "Skip basics" },
+        { "value": "rusty", "label": "Know it but rusty", "planningHint": "Focus on refreshing" },
+        { "value": "custom", "label": "Not sure / Custom", "planningHint": "Start with assessment" }
+      ]
+    }
+  ]
+}
+
+**MANDATORY REQUIREMENTS:**
+1. Questions should feel like a friendly conversation, not an interview
+2. Each question MUST have an "options" array with at least 4 objects
+3. Each option object MUST have: "value", "label", and "planningHint" fields
+4. Labels should be 2-6 words max (scannable)
+5. Always include a "Not sure / Custom" option as the last option
+6. Avoid jargon: "What pace feels sustainable?" not "What's your weekly time allocation?"
+
+Return ONLY valid JSON with exactly 3 questions, each with a complete options array.`;
+}
+
+/**
+ * Format clarification context for decomposition prompt
+ */
+export interface ClarificationContext {
+  scopeHint?: string;
+  skillLevel?: string;
+  timeCommitment?: string;
+  preferredRhythm?: string;
+  priorityLevel?: string;
+}
+
+function formatClarificationContext(context?: ClarificationContext): string {
+  if (!context) return '';
+
+  const hints: string[] = [];
+  if (context.scopeHint) hints.push(`- Desired depth: ${context.scopeHint}`);
+  if (context.skillLevel) hints.push(`- Starting point: ${context.skillLevel}`);
+  if (context.timeCommitment) hints.push(`- Time available: ${context.timeCommitment}`);
+  if (context.preferredRhythm) hints.push(`- Preferred rhythm: ${context.preferredRhythm}`);
+  if (context.priorityLevel) hints.push(`- Priority: ${context.priorityLevel}`);
+
+  if (hints.length === 0) return '';
+
+  return `\n**User Context (from clarification):**\n${hints.join('\n')}\n`;
+}
 
 /**
  * Stage 1: Decompose Goal into Milestone Tasks
  * A Task represents a meaningful milestone - something the user can DO after completing it.
  * Focus on achievable chunks that build confidence.
  */
-export function getDecomposeGoalPrompt(goalText: string, targetDate?: string): string {
+export function getDecomposeGoalPrompt(goalText: string, targetDate?: string, clarificationContext?: ClarificationContext): string {
   const targetContext = targetDate
     ? `\nSoft target: ${new Date(targetDate).toLocaleDateString()} (a gentle guideline, not a deadline)`
     : '';
 
+  const userContext = formatClarificationContext(clarificationContext);
+
   return `You are a supportive guide helping someone break down their goal into achievable milestones.
 
-Goal: "${goalText}"${targetContext}
+Goal: "${goalText}"${targetContext}${userContext}
 
 Design 3-6 milestone tasks that build on each other. Each milestone should feel like a small win.
+${userContext ? '\n**Important:** Use the user context above to tailor task depth, starting point, and pacing.\n' : ''}
+
+**CRITICAL CONSTRAINTS:**
+1. ALL tasks MUST be directly related to: "${goalText}"
+2. Do NOT use examples or tasks from other domains or topics
+3. Every task must help achieve THIS SPECIFIC goal, not any other goal
+4. If the goal mentions specific technologies, tools, or domains, focus strictly on those
 
 **GUIDING PRINCIPLES:**
-1. **Achievable Milestones**: Each task title describes what the user CAN DO after completing it (e.g., "Play a complete simple song" not "Guitar basics").
+1. **Achievable Milestones**: Each task title describes what the user CAN DO after completing it (e.g., "Solve 10 array problems" not "Learn arrays").
 2. **Progressive Confidence**: Early tasks should be easier, building toward harder ones.
 3. **No Overlap**: Each task covers distinct ground.
 4. **Realistic Effort**: Consider a beginner's pace - learning takes time.
@@ -29,7 +125,7 @@ Design 3-6 milestone tasks that build on each other. Each milestone should feel 
 {
   "tasks": [
     {
-      "title": "Confidently [specific achievable outcome]",
+      "title": "Confidently [specific achievable outcome related to the goal]",
       "estimatedTotalMinutes": 180,
       "whyThisMatters": "Brief encouragement about what this unlocks"
     }
@@ -40,9 +136,9 @@ Design 3-6 milestone tasks that build on each other. Each milestone should feel 
 - Titles should complete: "After this, I can ___"
 - Minimum 60 minutes for simple tasks, typically 120-600 minutes
 - Avoid vague words like "basics", "fundamentals", "introduction"
-- Be specific: "Navigate the keyboard's white keys" not "Learn keyboard basics"
+- Be specific and directly relevant to "${goalText}"
 
-Return ONLY valid JSON. Generate tasks strictly relevant to this specific goal.`;
+Return ONLY valid JSON. Generate tasks STRICTLY relevant to achieving: "${goalText}"`;
 }
 
 /**
@@ -78,20 +174,20 @@ Create a sequence of small work units. Each should feel approachable - something
 {
   "workUnits": [
     {
-      "title": "Find and bookmark 3 beginner tutorials on [topic]",
+      "title": "Research and identify 3 key resources for [topic]",
       "kind": "explore",
       "estimatedTotalMinutes": 20,
       "capabilityId": "domain.specific_skill",
-      "firstAction": "Open browser and search '[specific search term]'",
-      "successSignal": "You have 3 bookmarked links you're excited to try"
+      "firstAction": "Open browser and search for [relevant search term]",
+      "successSignal": "You have 3 bookmarked resources you're ready to use"
     },
     {
-      "title": "Follow along with first tutorial to [specific outcome]",
-      "kind": "build",
+      "title": "Complete first learning module to [specific outcome]",
+      "kind": "study",
       "estimatedTotalMinutes": 45,
       "capabilityId": "domain.another_skill",
-      "firstAction": "Open the first bookmarked tutorial",
-      "successSignal": "You've completed the tutorial and can [specific thing]"
+      "firstAction": "Open the first resource and start reading",
+      "successSignal": "You understand [specific concept] and can explain it"
     }
   ]
 }

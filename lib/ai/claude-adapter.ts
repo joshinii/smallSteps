@@ -1,7 +1,7 @@
 // SmallSteps Claude Adapter
 // Implements AIProvider interface using server-side API route
 
-import type { AIProvider, GoalPlan, TaskPlan, EffortEstimate } from './ai-provider';
+import type { AIProvider, GoalPlan, TaskPlan, EffortEstimate, ClarificationQuestion, ClarificationResult } from './ai-provider';
 
 export class ClaudeAdapter implements AIProvider {
     readonly name = 'claude';
@@ -39,11 +39,34 @@ export class ClaudeAdapter implements AIProvider {
         return data.result;
     }
 
-    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string): Promise<GoalPlan> {
+    async clarifyGoal(goalText: string, traceId?: string): Promise<ClarificationQuestion[]> {
         try {
-            // New prompt architecture doesn't use userFeedback/isLifelong/traceId in the same way yet,
-            // but we keep signature for compatibility.
-            const resultString = await this.callAPI('decomposeGoal', { goalText, targetDate });
+            const resultString = await this.callAPI('clarifyGoal', { goalText, traceId });
+            const parsed = JSON.parse(resultString);
+
+            // Validate and return questions
+            const questions = parsed.questions || [];
+            return questions.slice(0, 3).map((q: any) => ({
+                id: q.id || `q_${Math.random().toString(36).slice(2)}`,
+                questionText: q.questionText,
+                planningDimension: q.planningDimension || 'scope',
+                options: (q.options || []).map((o: any) => ({
+                    value: o.value,
+                    label: o.label,
+                    planningHint: o.planningHint
+                }))
+            }));
+        } catch (error) {
+            console.error('Claude clarifyGoal error:', error);
+            throw error;
+        }
+    }
+
+    async decomposeGoal(goalText: string, targetDate?: string, userFeedback?: string, isLifelong?: boolean, traceId?: string, clarificationContext?: ClarificationResult): Promise<GoalPlan> {
+        try {
+            // Pass clarification context to improve planning
+            const clarificationPayload = clarificationContext?.planningContext || undefined;
+            const resultString = await this.callAPI('decomposeGoal', { goalText, targetDate, clarificationContext: clarificationPayload });
             const parsed = JSON.parse(resultString);
 
             return {
