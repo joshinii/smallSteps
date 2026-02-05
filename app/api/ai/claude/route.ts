@@ -57,13 +57,23 @@ export async function POST(request: NextRequest) {
           parsed = { questions: [] };
         }
 
-        // Ensure exactly 3 questions
-        const questions = (parsed.questions || []).slice(0, 3);
-        if (questions.length < 3) {
-          console.warn('[clarifyGoal] AI returned fewer than 3 questions, using defaults');
+        let questions = (parsed.questions || []).slice(0, 3);
+
+        // Validate that each question has valid options array with labels
+        const hasInvalidQuestions = questions.some((q: any) =>
+          !q.options || !Array.isArray(q.options) || q.options.length === 0 ||
+          q.options.some((opt: any) => !opt.label || typeof opt.label !== 'string' || opt.label.trim() === '')
+        );
+
+        if (hasInvalidQuestions || questions.length === 0) {
+          console.warn('[clarifyGoal] AI returned invalid questions (missing labels), using fallback defaults');
+          const { manualProvider } = await import('@/lib/ai/ai-provider');
+          questions = await manualProvider.clarifyGoal(goalText);
         }
 
-        console.log('[clarifyGoal] Generated', questions.length, 'questions for goal:', goalText.substring(0, 50), traceId ? `(trace: ${traceId})` : '');
+        console.log('[clarifyGoal] Generated', questions.length, 'questions with',
+          questions.map((q: any) => q.options?.length || 0).join('/'), 'options for goal:',
+          goalText.substring(0, 50), traceId ? `(trace: ${traceId})` : '');
         return NextResponse.json({ result: JSON.stringify({ questions }) });
       }
 
@@ -80,6 +90,28 @@ export async function POST(request: NextRequest) {
 
         const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
         const result = processGoalDecomposition(text);
+
+        // Log generated tasks for debugging
+        try {
+          const parsed = JSON.parse(result);
+          const taskTitles = (parsed.tasks || []).map((t: any) => t.title || t.content);
+          console.log('[decomposeGoal] Goal:', goalText.substring(0, 50));
+          console.log('[decomposeGoal] Generated tasks:', taskTitles);
+
+          // Basic relevance check: warn if tasks seem off-topic
+          const goalKeywords = goalText.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+          const possiblyIrrelevant = taskTitles.filter((title: string) => {
+            const titleLower = title.toLowerCase();
+            return !goalKeywords.some((keyword: string) => titleLower.includes(keyword));
+          });
+
+          if (possiblyIrrelevant.length > 0) {
+            console.warn('[decomposeGoal] ⚠️  Possibly irrelevant tasks detected:', possiblyIrrelevant);
+          }
+        } catch (e) {
+          // Ignore parsing errors for logging
+        }
+
         return NextResponse.json({ result });
       }
 
