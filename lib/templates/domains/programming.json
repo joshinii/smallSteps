@@ -1,0 +1,29 @@
+{
+    "domain": "programming",
+    "displayName": "Programming & Development",
+    "description": "Learning to code, building projects, mastering frameworks",
+    "phases": [
+        "Setup & Fundamentals",
+        "Core Practice",
+        "Advanced Application",
+        "Portfolio Building"
+    ],
+    "keywords": [
+        "code",
+        "programming",
+        "developer",
+        "software",
+        "app",
+        "website",
+        "api",
+        "database",
+        "frontend",
+        "backend",
+        "python",
+        "javascript",
+        "react",
+        "dsa",
+        "algorithms",
+        "data structures"
+    ]
+}

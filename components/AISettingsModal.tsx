@@ -3,233 +3,279 @@
 // SmallSteps AI Settings Modal
 // Calm, non-intrusive UI for configuring AI providers
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAI } from '@/lib/ai/AIContext';
 import { ProviderName, PROVIDER_INFO, hasApiKey, hasStorageConsent, setStorageConsent, validateProviderKey, isLocalProvider } from '@/lib/ai';
+import { getFeatures, setFeature } from '@/lib/config/features';
+import { exportAndDownload, importData, readFileAsText } from '@/lib/utils/export';
+import LLMSetup from './LLMSetup';
 
 export default function AISettingsModal() {
-    const { showSetupModal, closeSetupModal, configureProvider, removeKey, provider: currentProvider } = useAI();
-    const [selectedProvider, setSelectedProvider] = useState<ProviderName>(
-        currentProvider === 'manual' ? 'claude' : currentProvider
-    );
-    const [apiKey, setApiKey] = useState('');
-    const [error, setError] = useState('');
-    const [isValidating, setIsValidating] = useState(false);
-    const [rememberKey, setRememberKey] = useState(hasStorageConsent());
+    const { showSetupModal, closeSetupModal } = useAI();
+    const [activeTab, setActiveTab] = useState<'provider' | 'features' | 'data'>('provider');
+
+    // Feature flags state - initialize with direct call (safe due to internal window check)
+    const [features, setFeatures] = useState(() => getFeatures());
+
+    // Data management state
+    const [isExporting, setIsExporting] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [dataMessage, setDataMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [showImportConfirm, setShowImportConfirm] = useState(false);
+    const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Sync when modal opens
+    useEffect(() => {
+        if (showSetupModal) {
+            setFeatures(getFeatures());
+        }
+    }, [showSetupModal]);
 
     if (!showSetupModal) return null;
 
-    const providerInfo = PROVIDER_INFO[selectedProvider];
+    const toggleFeature = (key: string) => {
+        const newValue = (features as any)[key] ? false : true;
+        setFeature(key as any, newValue);
+        setFeatures(prev => ({ ...prev, [key]: newValue }));
+    };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-
-        // Local providers (manual, lmstudio) don't need API keys
-        const needsApiKey = !isLocalProvider(selectedProvider);
-
-        if (needsApiKey && !apiKey.trim()) {
-            setError('Please enter an API key');
-            return;
-        }
-
-        setIsValidating(true);
-        setError('');
-
+    // Handle export
+    const handleExport = async () => {
+        setIsExporting(true);
+        setDataMessage(null);
         try {
-            // Verify key if not manual or lmstudio
-            if (needsApiKey) {
-                const isValid = await validateProviderKey(selectedProvider, apiKey.trim());
-                if (!isValid) {
-                    setError(`Invalid API key for ${PROVIDER_INFO[selectedProvider].displayName}. Please check and try again.`);
-                    setIsValidating(false);
-                    return;
-                }
-            } else if (selectedProvider === 'lmstudio') {
-                // For LM Studio, just validate connection
-                const isValid = await validateProviderKey(selectedProvider, '');
-                if (!isValid) {
-                    setError('Cannot connect to LM Studio. Make sure the server is running on localhost:1234.');
-                    setIsValidating(false);
-                    return;
-                }
-            }
-
-            // Set storage consent before configuring
-            setStorageConsent(rememberKey);
-            configureProvider(selectedProvider, apiKey.trim());
-            setApiKey('');
-            setError('');
-        } catch (err) {
-            setError('Validation failed due to network error.');
+            await exportAndDownload();
+            setDataMessage({ type: 'success', text: 'Data exported successfully!' });
+        } catch (error) {
+            setDataMessage({ type: 'error', text: 'Failed to export data' });
         } finally {
-            setIsValidating(false);
+            setIsExporting(false);
         }
     };
 
-    const handleSkip = () => {
-        configureProvider('manual', '');
-        setApiKey('');
-        setError('');
+    // Handle file selection
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setPendingImportFile(file);
+            setShowImportConfirm(true);
+        }
+    };
+
+    // Confirm and execute import
+    const handleConfirmImport = async () => {
+        if (!pendingImportFile) return;
+
+        setIsImporting(true);
+        setShowImportConfirm(false);
+        setDataMessage(null);
+
+        try {
+            const jsonString = await readFileAsText(pendingImportFile);
+            const result = await importData(jsonString);
+
+            if (result.success) {
+                setDataMessage({
+                    type: 'success',
+                    text: `Imported ${result.counts.goals} goals, ${result.counts.tasks} tasks, ${result.counts.workUnits} work units`
+                });
+                // Refresh page to reflect changes
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                setDataMessage({ type: 'error', text: result.error || 'Import failed' });
+            }
+        } catch (error) {
+            setDataMessage({ type: 'error', text: 'Failed to read file' });
+        } finally {
+            setIsImporting(false);
+            setPendingImportFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
     };
 
     return (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-8 animate-slideUp">
+            <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 overflow-hidden animate-slideUp">
                 {/* Header */}
-                <div className="mb-6">
-                    <h2 className="text-2xl font-light text-foreground mb-2">AI Assistant</h2>
-                    <p className="text-muted text-sm">
-                        Connect an AI to help break down goals and suggest tasks.
-                        Your API key stays on your device only.
-                    </p>
+                <div className="p-6 border-b border-gray-100 bg-slate-50/50">
+                    <div className="flex items-center justify-between mb-2">
+                        <h2 className="text-xl font-light text-slate-800">Intelligence Settings</h2>
+                        <button onClick={closeSetupModal} className="text-slate-400 hover:text-slate-600">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+                    <div className="flex gap-4 text-sm mt-4">
+                        <button
+                            onClick={() => setActiveTab('provider')}
+                            className={`pb-2 border-b-2 transition-colors ${activeTab === 'provider' ? 'border-accent text-accent font-medium' : 'border-transparent text-muted hover:text-foreground'}`}
+                        >
+                            AI Provider
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('features')}
+                            className={`pb-2 border-b-2 transition-colors ${activeTab === 'features' ? 'border-accent text-accent font-medium' : 'border-transparent text-muted hover:text-foreground'}`}
+                        >
+                            Features
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('data')}
+                            className={`pb-2 border-b-2 transition-colors ${activeTab === 'data' ? 'border-accent text-accent font-medium' : 'border-transparent text-muted hover:text-foreground'}`}
+                        >
+                            Data
+                        </button>
+                    </div>
                 </div>
 
-                <form onSubmit={handleSubmit}>
-                    {/* Provider Selection */}
-                    <div className="mb-6">
-                        <label className="block text-sm font-medium text-muted mb-2">
-                            Choose a provider
-                        </label>
-                        <div className="space-y-2">
-                            {(['lmstudio', 'claude', 'gemini', 'openai'] as ProviderName[]).map((name) => (
-                                <label
-                                    key={name}
-                                    className={`flex items-center p-3 rounded-xl border-2 cursor-pointer transition-all ${selectedProvider === name
-                                        ? 'border-accent bg-accent/5'
-                                        : 'border-gray-100 hover:border-gray-200'
-                                        }`}
-                                >
-                                    <input
-                                        type="radio"
-                                        name="provider"
-                                        value={name}
-                                        checked={selectedProvider === name}
-                                        onChange={() => {
-                                            setSelectedProvider(name);
-                                            setError('');
-                                        }}
-                                        className="sr-only"
-                                    />
-                                    <span className="font-medium text-foreground">
-                                        {PROVIDER_INFO[name].displayName}
-                                    </span>
-                                    {hasApiKey(name) && selectedProvider !== name && (
-                                        <div className="ml-auto flex items-center gap-2">
-                                            <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                                                Active
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                    if (confirm(`Remove API key for ${PROVIDER_INFO[name].displayName}?`)) {
-                                                        removeKey(name);
-                                                    }
-                                                }}
-                                                className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                                                title="Remove API Key"
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                    <polyline points="3 6 5 6 21 6"></polyline>
-                                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    )}
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* API Key Input - Hidden for LM Studio (local) */}
-                    {selectedProvider !== 'lmstudio' && (
-                        <div className="mb-6">
-                            <label className="block text-sm font-medium text-muted mb-2">
-                                API Key
-                            </label>
-                            <input
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => {
-                                    setApiKey(e.target.value);
-                                    setError('');
-                                }}
-                                placeholder={providerInfo.placeholder}
-                                className="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-accent focus:outline-none transition-colors"
-                            />
-                            {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-                            <a
-                                href={providerInfo.keyUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-block mt-2 text-sm text-accent hover:underline"
-                            >
-                                Get a {PROVIDER_INFO[selectedProvider].displayName} key →
-                            </a>
-                        </div>
-                    )}
-
-                    {/* LM Studio info */}
-                    {selectedProvider === 'lmstudio' && (
-                        <div className="mb-6 p-4 bg-green-50 rounded-xl border border-green-100">
-                            <p className="text-sm text-green-800">
-                                <strong>Local AI</strong> — No API key needed. Make sure LM Studio server is running on localhost:1234.
-                            </p>
-                            {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-                        </div>
-                    )}
-
-                    {/* Remember Key Checkbox */}
-                    <div className="mb-6">
-                        <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={rememberKey}
-                                onChange={(e) => setRememberKey(e.target.checked)}
-                                className="w-4 h-4 mt-0.5 rounded border-gray-300 text-foreground focus:ring-offset-0 focus:ring-1 focus:ring-gray-400"
-                            />
-                            <div className="flex-1">
-                                <span className="block text-sm font-medium text-foreground">Remember API key</span>
-                                <span className="block text-xs text-muted mt-0.5">
-                                    Saves key securely on this device. You won't need to re-enter it.
-                                </span>
+                <div className="p-6 max-h-[70vh] overflow-y-auto">
+                    {activeTab === 'provider' ? (
+                        <div className="space-y-4">
+                            <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-800 border border-blue-100 mb-4">
+                                <strong>Privacy First:</strong> Your API keys are stored locally on your device.
+                                We never see them. Local AI runs entirely offline.
                             </div>
-                        </label>
-                    </div>
+                            <LLMSetup />
+                        </div>
+                    ) : activeTab === 'features' ? (
+                        <div className="space-y-6">
+                            <p className="text-sm text-muted">
+                                Enable enhanced capabilities. These run securely using your selected AI provider.
+                            </p>
 
-                    {/* Actions */}
-                    <div className="flex gap-3">
-                        <button
-                            type="submit"
-                            disabled={isValidating}
-                            className="flex-1 px-6 py-3 bg-foreground text-white rounded-xl hover:opacity-90 transition-opacity font-medium disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                            {isValidating ? (
-                                <>
-                                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    Verifying...
-                                </>
-                            ) : (
-                                'Connect'
+                            <div className="space-y-4">
+                                <FeatureToggle
+                                    label="Agent Orchestration"
+                                    description="Multi-agent workflow: Clarifier → Decomposer → Validator"
+                                    checked={features.agentOrchestration}
+                                    onChange={() => toggleFeature('agentOrchestration')}
+                                />
+                                <FeatureToggle
+                                    label="Intelligent Planning"
+                                    description="Breaks down goals into phases and smart milestones"
+                                    checked={features.smartPlanning}
+                                    onChange={() => toggleFeature('smartPlanning')}
+                                />
+                                <FeatureToggle
+                                    label="Context Gathering"
+                                    description="Asks clarifying questions before generating tasks"
+                                    checked={features.contextGathering}
+                                    onChange={() => toggleFeature('contextGathering')}
+                                />
+                                <FeatureToggle
+                                    label="Capacity Balancing"
+                                    description="Distributes tasks based on your daily capacity (240m)"
+                                    checked={features.multiGoalBalancing}
+                                    onChange={() => toggleFeature('multiGoalBalancing')}
+                                />
+                                <FeatureToggle
+                                    label="Relevance Filter"
+                                    description="Uses embeddings to filter off-topic AI suggestions"
+                                    checked={features.relevanceValidation}
+                                    onChange={() => toggleFeature('relevanceValidation')}
+                                />
+                            </div>
+                        </div>
+                    ) : activeTab === 'data' ? (
+                        <div className="space-y-6">
+                            <p className="text-sm text-muted">
+                                Export your data for backup or import from a previous backup.
+                            </p>
+
+                            {/* Status message */}
+                            {dataMessage && (
+                                <div className={`p-3 rounded-lg text-sm ${dataMessage.type === 'success'
+                                    ? 'bg-green-50 text-green-700 border border-green-100'
+                                    : 'bg-red-50 text-red-700 border border-red-100'
+                                    }`}>
+                                    {dataMessage.text}
+                                </div>
                             )}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleSkip}
-                            className="px-6 py-3 text-muted hover:text-foreground rounded-xl border-2 border-gray-100 hover:border-gray-200 transition-colors"
-                        >
-                            Skip
-                        </button>
-                    </div>
-                </form>
 
-                {/* Footer note */}
-                <p className="mt-6 text-xs text-muted text-center">
-                    You can always change this later in Settings.
-                    The app works without AI too—just with less magic.
-                </p>
+                            {/* Export section */}
+                            <div className="p-4 border border-gray-100 rounded-xl">
+                                <h4 className="font-medium text-slate-700 mb-2">Export Data</h4>
+                                <p className="text-xs text-muted mb-3">
+                                    Download all your goals, tasks, work units, and habits as a JSON file.
+                                </p>
+                                <button
+                                    onClick={handleExport}
+                                    disabled={isExporting || isImporting}
+                                    className="px-4 py-2 bg-foreground text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity text-sm font-medium"
+                                >
+                                    {isExporting ? 'Exporting...' : 'Download Backup'}
+                                </button>
+                            </div>
+
+                            {/* Import section */}
+                            <div className="p-4 border border-gray-100 rounded-xl">
+                                <h4 className="font-medium text-slate-700 mb-2">Import Data</h4>
+                                <p className="text-xs text-muted mb-3">
+                                    Restore from a previous backup. This will replace all existing data.
+                                </p>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                />
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isExporting || isImporting}
+                                    className="px-4 py-2 border border-gray-300 text-foreground rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors text-sm font-medium"
+                                >
+                                    {isImporting ? 'Importing...' : 'Choose Backup File'}
+                                </button>
+                            </div>
+
+                            {/* Import confirmation dialog */}
+                            {showImportConfirm && (
+                                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                                    <h4 className="font-medium text-amber-800 mb-2">⚠️ Confirm Import</h4>
+                                    <p className="text-sm text-amber-700 mb-3">
+                                        This will replace ALL your existing data with the backup. This cannot be undone.
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={handleConfirmImport}
+                                            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium"
+                                        >
+                                            Yes, Replace All Data
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowImportConfirm(false);
+                                                setPendingImportFile(null);
+                                                if (fileInputRef.current) fileInputRef.current.value = '';
+                                            }}
+                                            className="px-4 py-2 border border-gray-300 text-foreground rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
+                </div>
             </div>
         </div>
     );
 }
+
+function FeatureToggle({ label, description, checked, onChange }: any) {
+    return (
+        <label className="flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-100 transition-all">
+            <div className="relative inline-flex items-center cursor-pointer mt-1">
+                <input type="checkbox" className="sr-only peer" checked={checked} onChange={onChange} />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+            </div>
+            <div className="flex-1">
+                <div className="font-medium text-slate-700">{label}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{description}</div>
+            </div>
+        </label>
+    );
+}
+
+

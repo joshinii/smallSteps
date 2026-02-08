@@ -6,6 +6,9 @@ import { goalsDB, tasksDB, workUnitsDB, dailyAllocationsDB } from './db';
 import type { Goal, Task, WorkUnit, Slice, DailyPlan, DayMode, SliceLabel } from './schema';
 import { getSliceLabel, isWorkUnitComplete } from './schema';
 import { getLocalDateString } from './utils';
+import { getFeatures } from './config/features';
+import { selectOptimalTasks } from './engine/smartPlanner';
+import { calculateTaskPriority } from './engine/priorityCalculator';
 
 // ============================================
 // Constants
@@ -28,19 +31,16 @@ const SLICE_RANGES: Record<DayMode, { min: number; max: number }> = {
 // ============================================
 
 /**
- * Estimate user's daily capacity based on completed history.
- * For now, returns conservative default. Can be enhanced with history analysis.
+ * Estimate user's daily capacity based on mode.
+ * Returns dynamic minutes: Light (45), Medium (90), Focus (180).
  */
-export async function estimateDailyCapacity(): Promise<number> {
-    const allocations = await dailyAllocationsDB.getAll();
-    const completed = allocations.filter(a => a.completedAt);
-
-    if (completed.length >= 3) {
-        const avgMinutes = completed.reduce((sum, a) => sum + a.estimatedLoad, 0) / completed.length;
-        return Math.max(MIN_DAILY_CAPACITY, Math.min(MAX_DAILY_CAPACITY, Math.round(avgMinutes)));
-    }
-
-    return DEFAULT_DAILY_CAPACITY;
+export async function estimateDailyCapacity(mode: DayMode = 'medium'): Promise<number> {
+    const defaults: Record<DayMode, number> = {
+        light: 45,
+        medium: 90,
+        focus: 180
+    };
+    return defaults[mode];
 }
 
 // ============================================
@@ -64,6 +64,15 @@ export function generateSlice(
     const range = SLICE_RANGES[mode];
     const sliceMinutes = Math.min(remaining, range.min + Math.floor(Math.random() * (range.max - range.min)));
 
+    // Extract smart plan reason if available
+    let reason: 'quick-win' | 'due-soon' | 'momentum' | undefined;
+    if (task.complexity === 1) reason = 'quick-win';
+    if (goal.targetDate) {
+        // Simple check for now, can be enriched by priorityCalculator params if passed down
+        const days = Math.ceil((new Date(goal.targetDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        if (days <= 7) reason = 'due-soon';
+    }
+
     return {
         workUnitId: workUnit.id,
         workUnit,
@@ -71,6 +80,7 @@ export function generateSlice(
         goal,
         minutes: sliceMinutes,
         label: getSliceLabel(sliceMinutes),
+        reason
     };
 }
 
@@ -99,6 +109,13 @@ async function prioritizeWorkUnits(): Promise<PrioritizedWorkUnit[]> {
     const prioritized: PrioritizedWorkUnit[] = [];
     const today = new Date();
 
+    const priorityStats = {
+        calculated: 0,
+        fallback: 0
+    };
+
+    const useSmartPlanning = getFeatures().smartPlanning;
+
     for (const workUnit of allWorkUnits) {
         if (isWorkUnitComplete(workUnit)) continue;
 
@@ -111,18 +128,26 @@ async function prioritizeWorkUnits(): Promise<PrioritizedWorkUnit[]> {
         // Calculate priority
         let priority = 50; // Base priority
 
-        // Target date urgency (higher priority for closer dates)
-        if (goal.targetDate) {
-            const targetDate = new Date(goal.targetDate);
-            const daysUntil = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (daysUntil <= 7) priority += 30;
-            else if (daysUntil <= 14) priority += 20;
-            else if (daysUntil <= 30) priority += 10;
-        }
+        if (useSmartPlanning) {
+            // Use deterministic Priority Calculator
+            const p = calculateTaskPriority(task, goal);
+            priority = p.totalScore;
+            priorityStats.calculated++;
+        } else {
+            // Fallback: Target date urgency (higher priority for closer dates)
+            if (goal.targetDate) {
+                const targetDate = new Date(goal.targetDate);
+                const daysUntil = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                if (daysUntil <= 7) priority += 30;
+                else if (daysUntil <= 14) priority += 20;
+                else if (daysUntil <= 30) priority += 10;
+            }
 
-        // Staleness bonus (TODO: track last worked date)
-        // For now, distribute evenly
-        priority += Math.random() * 10;
+            // Staleness bonus (TODO: track last worked date)
+            // For now, distribute evenly
+            priority += Math.random() * 10;
+            priorityStats.fallback++;
+        }
 
         prioritized.push({ workUnit, task, goal, priority });
     }
@@ -156,7 +181,7 @@ export async function generateDailyPlan(
 ): Promise<PlanGenerationResult> {
     console.log('[DEBUG][generateDailyPlan] Called with:', { date, mode });
 
-    const capacity = await estimateDailyCapacity();
+    const capacity = await estimateDailyCapacity(mode);
     const prioritizedUnits = await prioritizeWorkUnits();
 
     console.log('[DEBUG][generateDailyPlan] Capacity:', capacity, 'WorkUnits:', prioritizedUnits.length);
@@ -165,6 +190,38 @@ export async function generateDailyPlan(
     let usedMinutes = 0;
 
     const usedTaskIds = new Set<string>();
+
+    const useSmartPlanning = getFeatures().smartPlanning;
+
+    // Smart Planner (Knapsack)
+    // Instead of greedy "top down", find the best combination of tasks that fits
+    if (useSmartPlanning) {
+        console.log('[PlanningEngine] Using Smart Planner (Knapsack)...');
+        // Extract unique tasks
+        const uniqueTasksMap = new Map<string, Task>();
+        prioritizedUnits.forEach(u => uniqueTasksMap.set(u.task.id, u.task));
+        const uniqueTasks = Array.from(uniqueTasksMap.values());
+
+        // Get goals map for context
+        const goals = await goalsDB.getAll();
+        const goalsMap: Record<string, Goal> = {};
+        goals.forEach(g => goalsMap[g.id] = g);
+
+        // Run Knapsack
+        const { selectedTasks } = selectOptimalTasks(uniqueTasks, goalsMap, capacity);
+        const selectedIds = new Set(selectedTasks.map(t => t.id));
+
+        console.log(`[PlanningEngine] Smart Planner selected ${selectedTasks.length} optimal tasks.`);
+
+        // Filter work units to ONLY those in the smart plan
+        // This ensures working on high-value items even if they are smaller
+        const smartUnits = prioritizedUnits.filter(u => selectedIds.has(u.task.id));
+
+        // Replace the main list with our smart selection
+        // We still keep them sorted by priority for the slice generator
+        prioritizedUnits.length = 0;
+        prioritizedUnits.push(...smartUnits);
+    }
 
     // Generate slices up to capacity and cognitive limit
     for (const { workUnit, task, goal } of prioritizedUnits) {
@@ -352,7 +409,7 @@ export async function assessFeasibility(
     totalEffortMinutes: number,
     targetDate?: string
 ): Promise<FeasibilityResult> {
-    const capacity = await estimateDailyCapacity();
+    const capacity = await estimateDailyCapacity('medium');
 
     if (!targetDate) {
         return {
@@ -400,7 +457,7 @@ export async function assessFeasibility(
  * Suggest a realistic target date based on total effort and current workload.
  */
 export async function suggestTargetDate(totalEffortMinutes: number, excludeGoalId?: string): Promise<string> {
-    const capacity = await estimateDailyCapacity();
+    const capacity = await estimateDailyCapacity('medium');
 
     // Check how many active goals we already have to split capacity
     const allGoals = await goalsDB.getAll();
@@ -435,7 +492,7 @@ export async function assessTargetDateFeasibility(
  * Assess if adding a new goal is advisable given current load.
  */
 export async function assessGoalAdmission(totalMinutes: number): Promise<{ paceAdjustment: 'standard' | 'gentle'; message?: string }> {
-    const capacity = await estimateDailyCapacity();
+    const capacity = await estimateDailyCapacity('medium');
     // Simple check: if goal is huge (> 20 hours), suggest gentle pace
     if (totalMinutes > 1200) {
         return { paceAdjustment: 'gentle', message: 'This is a large goal. We will break it down into small daily steps.' };

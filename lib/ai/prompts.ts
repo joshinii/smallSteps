@@ -95,18 +95,29 @@ function formatClarificationContext(context?: ClarificationContext): string {
  * A Task represents a meaningful milestone - something the user can DO after completing it.
  * Focus on achievable chunks that build confidence.
  */
-export function getDecomposeGoalPrompt(goalText: string, targetDate?: string, clarificationContext?: ClarificationContext): string {
+export function getDecomposeGoalPrompt(
+  goalText: string,
+  targetDate?: string,
+  clarificationContext?: ClarificationContext,
+  domainContext?: { domain: string; phases: string[]; currentPhase?: string }
+): string {
   const targetContext = targetDate
     ? `\nSoft target: ${new Date(targetDate).toLocaleDateString()} (a gentle guideline, not a deadline)`
     : '';
 
   const userContext = formatClarificationContext(clarificationContext);
 
+  const domainInstruction = domainContext
+    ? `\n**Domain:** ${domainContext.domain}
+**Suggested Phases:** ${domainContext.phases.join(' → ')} (You may adapt these if needed)\n`
+    : '';
+
   return `You are a supportive guide helping someone break down their goal into achievable milestones.
 
-Goal: "${goalText}"${targetContext}${userContext}
+Goal: "${goalText}"${targetContext}${userContext}${domainInstruction}
 
-Design 3-6 milestone tasks that build on each other. Each milestone should feel like a small win.
+Design 3-8 milestone tasks that build on each other. Group them into logical phases to show progression.
+Each milestone should feel like a small win.
 ${userContext ? '\n**Important:** Use the user context above to tailor task depth, starting point, and pacing.\n' : ''}
 
 **CRITICAL CONSTRAINTS:**
@@ -114,9 +125,10 @@ ${userContext ? '\n**Important:** Use the user context above to tailor task dept
 2. Do NOT use examples or tasks from other domains or topics
 3. Every task must help achieve THIS SPECIFIC goal, not any other goal
 4. If the goal mentions specific technologies, tools, or domains, focus strictly on those
+5. Phases can be customized to the goal (e.g. "Planning", "Execution", "Review" or "Pre-production", "Production", "Post-production")
 
 **GUIDING PRINCIPLES:**
-1. **Achievable Milestones**: Each task title describes what the user CAN DO after completing it (e.g., "Solve 10 array problems" not "Learn arrays").
+1. **Achievable Milestones**: Each task title describes what the user CAN DO after completing it.
 2. **Progressive Confidence**: Early tasks should be easier, building toward harder ones.
 3. **No Overlap**: Each task covers distinct ground.
 4. **Realistic Effort**: Consider a beginner's pace - learning takes time.
@@ -127,19 +139,23 @@ ${userContext ? '\n**Important:** Use the user context above to tailor task dept
     {
       "title": "Confidently [specific achievable outcome related to the goal]",
       "estimatedTotalMinutes": 180,
+      "phase": "Phase Name (e.g. Research, Core Logic, UI Polish)",
+      "complexity": 1, // 1=Easy, 2=Medium, 3=Hard
       "whyThisMatters": "Brief encouragement about what this unlocks"
     }
   ]
 }
 
 **Quality Checks:**
-- Titles should complete: "After this, I can ___"
-- Minimum 60 minutes for simple tasks, typically 120-600 minutes
+- Titles should be concise and action-oriented (e.g., "Write simple Java programs")
+- Put the "After this, I can..." outcome benefit in the "whyThisMatters" field
+- Minimum 15 minutes for simple tasks (e.g. "Sign up for account"), typically 60-120 minutes for learning tasks
 - Avoid vague words like "basics", "fundamentals", "introduction"
 - Be specific and directly relevant to "${goalText}"
 
 Return ONLY valid JSON. Generate tasks STRICTLY relevant to achieving: "${goalText}"`;
 }
+
 
 /**
  * Stage 2: Decompose Task into Atomic WorkUnits

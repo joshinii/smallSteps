@@ -46,19 +46,29 @@ export default function HabitManager({ onClose, onUpdate }: HabitManagerProps) {
             let habitGoal = allGoals.find(g => g.title === 'Daily Habits');
 
             if (!habitGoal) {
-                habitGoal = await goalsDB.create({
+                const newId = await goalsDB.create({
                     title: 'Daily Habits',
                     status: 'active',
                     lifelong: true,
                     // No target date for general habits
                 });
+                // Create returns ID, so we construct the object for local use or fetch it
+                // Since this is indexedDB, fetching immediately might be race-prone in some wrappers,
+                // but usually fine. For safety, we'll manually construct the partial object needed
+                // for the logic below (which just needs habitGoal.id).
+                habitGoal = {
+                    id: newId,
+                    title: 'Daily Habits',
+                    status: 'active',
+                    lifelong: true
+                } as any;
             }
 
             // 2. Create Task
             // TODO: Migrate to use habitsDB instead of tasksDB
             // Legacy fields removed from Task schema: category, effortLabel, isRecurring, skipCount
             await tasksDB.create({
-                goalId: habitGoal.id,
+                goalId: habitGoal!.id, // Assert defined as we created it above if missing
                 title: newName.trim(),
                 estimatedTotalMinutes: 20, // Default duration
                 completedMinutes: 0,

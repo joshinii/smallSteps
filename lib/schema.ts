@@ -19,7 +19,19 @@ export interface Goal {
     completedAt?: string;
     createdAt: string;
     updatedAt: string;
+    constraints?: {
+        hoursPerWeek?: number;
+        experienceLevel?: 'beginner' | 'intermediate' | 'advanced';
+        targetDate?: Date;
+        scopeHint?: string;
+        timeCommitment?: string;
+    };
+    // NEW: Intelligent Planning Fields
+    ambiguityStatus?: 'clear' | 'needs_clarification' | 'clarified';
+    category?: 'health' | 'career' | 'learning' | 'financial' | 'creative' | 'other';
+    domain?: string; // Classified domain (e.g., 'programming', 'fitness')
 }
+
 
 /**
  * Task - Effort Container (Milestone)
@@ -36,6 +48,9 @@ export interface Task {
     estimatedTotalMinutes: number;
     completedMinutes: number;
     order: number;
+    // NEW: Intelligent Planning Fields
+    phase?: string; // Flexible phase name (e.g., 'Research', 'Coding', 'Marketing')
+    complexity?: 1 | 2 | 3;
     whyThisMatters?: string; // Encouragement/motivation for this milestone
     createdAt: string;
     updatedAt: string;
@@ -81,6 +96,7 @@ export interface Slice {
     goal: Goal;         // Populated for context
     minutes: number;
     label: SliceLabel;
+    reason?: 'quick-win' | 'due-soon' | 'momentum'; // AI Priority Reason
 }
 
 /**

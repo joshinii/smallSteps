@@ -30,18 +30,32 @@ const TaskItem = ({
         <div className={`p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
             <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-2">
-                        <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'text-muted' : ''}`}>
-                            {task.title}
-                        </p>
+                    <div className="flex items-start gap-3">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onComplete();
+                            }}
+                            className={`mt-1 flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${isComplete
+                                ? 'bg-green-500 border-green-500 text-white'
+                                : 'border-gray-300 hover:border-green-500 text-transparent hover:text-green-500'
+                                }`}
+                        >
+                            <CheckIcon size={12} />
+                        </button>
+                        <div>
+                            <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'text-muted line-through' : ''}`}>
+                                {task.title}
+                            </p>
+                            {/* Calm effort display - just remaining hours */}
+                            <p className="text-xs text-muted mt-1">
+                                {isComplete
+                                    ? 'Complete'
+                                    : formatEffortDisplay(task.estimatedTotalMinutes - task.completedMinutes) + ' left'
+                                }
+                            </p>
+                        </div>
                     </div>
-                    {/* Calm effort display - just remaining hours */}
-                    <p className="text-xs text-muted mt-1">
-                        {isComplete
-                            ? 'Complete'
-                            : formatEffortDisplay(task.estimatedTotalMinutes - task.completedMinutes) + ' left'
-                        }
-                    </p>
                 </div>
             </div>
         </div>
@@ -102,6 +116,16 @@ export default function HomePage() {
     }, []);
 
     useEffect(() => {
+        // Run migration on load for old goals
+        import('@/lib/migrations').then(({ repairWorkUnits }) => {
+            repairWorkUnits().then((count) => {
+                if (count > 0) {
+                    console.log('Migration completed, reloading goals...');
+                    loadGoals();
+                    reassessDailyPlans();
+                }
+            });
+        });
         loadGoals();
     }, [loadGoals]);
 
@@ -117,9 +141,10 @@ export default function HomePage() {
         });
     };
 
-    const handleGoalCreatorComplete = () => {
+    const handleGoalCreatorComplete = async () => {
         setShowCreator(false);
         setEditingGoal(null);
+        await reassessDailyPlans();
         loadGoals();
     };
 
@@ -429,7 +454,7 @@ export default function HomePage() {
                                                                     key={task.id}
                                                                     task={task}
                                                                     goalId={goal.id}
-                                                                    onComplete={() => { }} // Read-only in list view now
+                                                                    onComplete={() => handleCompleteTask(task.id, isTaskEffectivelyComplete(task), task.estimatedTotalMinutes)}
                                                                 />
                                                             ))}
                                                         </div>

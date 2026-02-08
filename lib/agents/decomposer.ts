@@ -1,4 +1,11 @@
 import { anthropic, DEFAULT_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE } from '../claude';
+import { z } from 'zod';
+import type { AIProvider } from '@/lib/ai/ai-provider';
+import type { GeneratedBreakdown, GeneratedTask, GeneratedWorkUnit, WorkUnitKind } from './types';
+
+// ============================================
+// Legacy Types (Backward Compatibility)
+// ============================================
 
 export interface DailyTask {
   task: string;
@@ -12,12 +19,132 @@ export interface DecomposedTasks {
   rationale?: string;
 }
 
+// ============================================
+// Zod Schemas for Validation
+// ============================================
+
+const WorkUnitKindSchema = z.enum(['study', 'practice', 'build', 'review', 'explore']);
+
+const GeneratedTaskSchema = z.object({
+  title: z.string().min(1),
+  estimatedTotalMinutes: z.number().min(15).max(600),
+  completedMinutes: z.number().default(0),
+  order: z.number().min(0),
+  phase: z.string().optional(),
+  complexity: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  whyThisMatters: z.string().optional(),
+});
+
+const GeneratedWorkUnitSchema = z.object({
+  title: z.string().min(1),
+  estimatedTotalMinutes: z.number().min(15).max(120),
+  completedMinutes: z.number().default(0),
+  kind: WorkUnitKindSchema,
+  capabilityId: z.string().optional(),
+  firstAction: z.string().optional(),
+  successSignal: z.string().optional(),
+  taskOrder: z.number().min(0),
+});
+
+const GeneratedBreakdownSchema = z.object({
+  tasks: z.array(GeneratedTaskSchema).min(3).max(6),
+  workUnits: z.array(GeneratedWorkUnitSchema).min(4),
+});
+
+// ============================================
+// Default Fallback Breakdown
+// ============================================
+
+function createFallbackBreakdown(goalTitle: string): GeneratedBreakdown {
+  return {
+    tasks: [
+      {
+        title: 'Get started with the basics',
+        estimatedTotalMinutes: 120,
+        completedMinutes: 0,
+        order: 0,
+        phase: 'Foundation',
+        whyThisMatters: 'Building a solid foundation makes everything easier',
+      },
+      {
+        title: 'Practice and build momentum',
+        estimatedTotalMinutes: 180,
+        completedMinutes: 0,
+        order: 1,
+        phase: 'Practice',
+        whyThisMatters: 'Consistent practice turns knowledge into skill',
+      },
+      {
+        title: 'Apply what you learned',
+        estimatedTotalMinutes: 240,
+        completedMinutes: 0,
+        order: 2,
+        phase: 'Application',
+        whyThisMatters: 'Real application cements your understanding',
+      },
+    ],
+    workUnits: [
+      {
+        title: `Research basics of: ${goalTitle}`,
+        estimatedTotalMinutes: 30,
+        completedMinutes: 0,
+        kind: 'study',
+        taskOrder: 0,
+        firstAction: 'Open a browser tab',
+        successSignal: 'You understand the key concepts',
+      },
+      {
+        title: 'Create a simple plan',
+        estimatedTotalMinutes: 20,
+        completedMinutes: 0,
+        kind: 'explore',
+        taskOrder: 0,
+        firstAction: 'Open your notes app',
+        successSignal: 'You have 3-5 bullet points written down',
+      },
+      {
+        title: 'Practice the first skill',
+        estimatedTotalMinutes: 45,
+        completedMinutes: 0,
+        kind: 'practice',
+        taskOrder: 1,
+        firstAction: 'Set a 15-minute timer',
+        successSignal: 'You completed one focused session',
+      },
+      {
+        title: 'Review what you practiced',
+        estimatedTotalMinutes: 15,
+        completedMinutes: 0,
+        kind: 'review',
+        taskOrder: 1,
+        firstAction: 'Look at your notes from the session',
+        successSignal: 'You identified one thing to improve',
+      },
+      {
+        title: 'Build something small',
+        estimatedTotalMinutes: 60,
+        completedMinutes: 0,
+        kind: 'build',
+        taskOrder: 2,
+        firstAction: 'Open your workspace',
+        successSignal: 'You have a working result',
+      },
+    ],
+  };
+}
+
+// ============================================
+// Legacy Decomposer (Backward Compatibility)
+// ============================================
+
 /**
- * Enhanced Decomposer Agent
+ * Enhanced Decomposer Agent (Legacy)
  * 
  * Purpose: Breaks ideas into intelligent, context-aware daily tasks
  * Output: Array of specific daily tasks with rationale
  * Principles: Deep understanding, practical scheduling, measurable actions
+ * 
+ * @deprecated Consider using generateStructuredBreakdown for full Task/WorkUnit output
  */
 export async function decomposeIdea(
   clarifiedIdea: string,
@@ -164,3 +291,236 @@ Return ONLY valid JSON, nothing else.`;
     };
   }
 }
+
+// ============================================
+// Structured Breakdown Generator (New)
+// ============================================
+
+/**
+ * Generate structured Task + WorkUnit breakdown for a goal
+ * 
+ * Uses AIProvider to generate a complete breakdown with:
+ * - 3-6 Tasks (milestones/phases)
+ * - 4-8 WorkUnits per Task
+ * - Quality fields (firstAction, successSignal, whyThisMatters)
+ * 
+ * @param goalTitle - The clarified goal text
+ * @param context - User answers from clarification questions
+ * @param aiProvider - AIProvider instance (from AIContext.getAI())
+ * @returns Promise<GeneratedBreakdown> - Tasks and WorkUnits ready for persistence
+ */
+export async function generateStructuredBreakdown(
+  goalTitle: string,
+  context: Record<string, any>,
+  aiProvider: AIProvider
+): Promise<GeneratedBreakdown> {
+  console.log('🤖 DECOMPOSER: Generating structured breakdown for:', goalTitle);
+  console.log('🤖 DECOMPOSER: Context:', JSON.stringify(context));
+
+  const prompt = buildStructuredBreakdownPrompt(goalTitle, context);
+
+  // Try up to 2 times (initial + 1 retry)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      console.log(`🤖 DECOMPOSER: Attempt ${attempt} - calling AI provider...`);
+
+      let response: string;
+
+      // Use generateCompletion if available
+      if ('generateCompletion' in aiProvider && typeof aiProvider.generateCompletion === 'function') {
+        response = await aiProvider.generateCompletion(prompt, {
+          temperature: 0.7,
+          maxTokens: 3000,
+          jsonMode: true,
+        });
+      } else {
+        // Fallback: Use decomposeGoal and then decomposeTask for each
+        console.log('🤖 DECOMPOSER: Provider lacks generateCompletion, using two-stage approach');
+        return await generateBreakdownTwoStage(goalTitle, context, aiProvider);
+      }
+
+      // Parse and validate response
+      const breakdown = parseAndValidateBreakdown(response);
+      console.log(`✅ DECOMPOSER: Generated ${breakdown.tasks.length} tasks and ${breakdown.workUnits.length} work units`);
+      return breakdown;
+
+    } catch (error) {
+      console.error(`❌ DECOMPOSER: Attempt ${attempt} failed:`, error);
+
+      if (attempt === 2) {
+        console.warn('⚠️ DECOMPOSER: All attempts failed, using fallback breakdown');
+        return createFallbackBreakdown(goalTitle);
+      }
+    }
+  }
+
+  // Should never reach here, but TypeScript needs it
+  return createFallbackBreakdown(goalTitle);
+}
+
+// ============================================
+// Helper Functions
+// ============================================
+
+/**
+ * Build the prompt for generating structured breakdown
+ */
+function buildStructuredBreakdownPrompt(goalTitle: string, context: Record<string, any>): string {
+  return `Goal: "${goalTitle}"
+User Context: ${JSON.stringify(context)}
+
+Create a complete breakdown for a user who struggles with starting tasks.
+Focus on reducing overwhelm and making every step feel doable.
+
+Structure:
+- 3-6 Tasks (major milestones that feel achievable)
+- 4-8 WorkUnits total across all tasks (concrete actions)
+
+Task fields:
+- title: Clear milestone description (encouraging, not intimidating)
+- estimatedTotalMinutes: Realistic total time (60-300 minutes)
+- completedMinutes: Always 0 (not started)
+- order: Progressive sequence starting from 0
+- phase: Category (e.g., "Foundation", "Learning", "Practice", "Building")
+- complexity: 1 (simple), 2 (moderate), or 3 (complex)
+- whyThisMatters: Brief motivation - what completing this unlocks
+
+WorkUnit fields:
+- title: Specific actionable step (clear and concrete)
+- estimatedTotalMinutes: 15-120 minutes (prefer shorter 15-45 min)
+- completedMinutes: Always 0 (not started)
+- kind: study | practice | build | review | explore
+- firstAction: Tiny immediate step that takes <2 min (e.g., "Open your browser")
+- successSignal: Observable sign that this unit is complete
+- taskOrder: Links to parent task by order (0, 1, 2...)
+
+Guidelines:
+- Each firstAction should be trivially easy to reduce activation energy
+- successSignal should be concrete and observable, not vague
+- Distribute workUnits across tasks (aim for similar effort per task)
+- Use friendly, supportive language throughout
+
+Return ONLY valid JSON matching this exact structure:
+{
+  "tasks": [
+    {
+      "title": "Get comfortable with the basics",
+      "estimatedTotalMinutes": 90,
+      "completedMinutes": 0,
+      "order": 0,
+      "phase": "Foundation",
+      "complexity": 1,
+      "whyThisMatters": "Understanding the basics makes everything else click"
+    }
+  ],
+  "workUnits": [
+    {
+      "title": "Watch an intro video",
+      "estimatedTotalMinutes": 20,
+      "completedMinutes": 0,
+      "kind": "study",
+      "firstAction": "Open YouTube",
+      "successSignal": "You watched at least 10 minutes",
+      "taskOrder": 0
+    }
+  ]
+}
+
+Return ONLY the JSON, no markdown, no explanation.`;
+}
+
+/**
+ * Fallback: Generate breakdown using two-stage approach
+ * (decomposeGoal → decomposeTask for each task)
+ */
+async function generateBreakdownTwoStage(
+  goalTitle: string,
+  context: Record<string, any>,
+  aiProvider: AIProvider
+): Promise<GeneratedBreakdown> {
+  console.log('🤖 DECOMPOSER: Using two-stage approach...');
+
+  // Stage 1: Get tasks from decomposeGoal
+  const goalPlan = await aiProvider.decomposeGoal(goalTitle);
+
+  const tasks: GeneratedTask[] = goalPlan.tasks.map((t, index) => ({
+    title: t.title,
+    estimatedTotalMinutes: t.estimatedTotalMinutes || 120,
+    completedMinutes: 0,
+    order: index,
+    phase: t.phase,
+    complexity: t.complexity,
+    whyThisMatters: t.whyThisMatters,
+  }));
+
+  // Stage 2: Get work units for each task
+  const allWorkUnits: GeneratedWorkUnit[] = [];
+
+  for (let i = 0; i < Math.min(tasks.length, 4); i++) {
+    const task = tasks[i];
+    try {
+      const taskPlan = await aiProvider.decomposeTask(
+        task.title,
+        task.estimatedTotalMinutes,
+        tasks.map(t => t.title),
+        []
+      );
+
+      const workUnits = taskPlan.workUnits.map(wu => ({
+        title: wu.title,
+        estimatedTotalMinutes: wu.estimatedTotalMinutes || 30,
+        completedMinutes: 0,
+        kind: wu.kind as WorkUnitKind,
+        capabilityId: wu.capabilityId,
+        firstAction: wu.firstAction,
+        successSignal: wu.successSignal,
+        taskOrder: i,
+      }));
+
+      allWorkUnits.push(...workUnits);
+    } catch (error) {
+      console.error(`❌ DECOMPOSER: Failed to decompose task ${i}:`, error);
+    }
+  }
+
+  // Ensure we have at least some work units
+  if (allWorkUnits.length === 0) {
+    return createFallbackBreakdown(goalTitle);
+  }
+
+  return { tasks, workUnits: allWorkUnits };
+}
+
+/**
+ * Parse AI response and validate against GeneratedBreakdown schema
+ */
+function parseAndValidateBreakdown(response: string): GeneratedBreakdown {
+  // Extract JSON from response (handle markdown code blocks)
+  let jsonText = response.trim();
+
+  if (jsonText.includes('```json')) {
+    jsonText = jsonText.split('```json')[1].split('```')[0].trim();
+  } else if (jsonText.includes('```')) {
+    jsonText = jsonText.split('```')[1].split('```')[0].trim();
+  }
+
+  // Parse JSON
+  const parsed = JSON.parse(jsonText);
+
+  // Validate with Zod
+  const validated = GeneratedBreakdownSchema.parse(parsed);
+
+  // Ensure completedMinutes defaults
+  validated.tasks = validated.tasks.map(t => ({
+    ...t,
+    completedMinutes: t.completedMinutes ?? 0,
+  }));
+
+  validated.workUnits = validated.workUnits.map(wu => ({
+    ...wu,
+    completedMinutes: wu.completedMinutes ?? 0,
+  }));
+
+  return validated as GeneratedBreakdown;
+}
+

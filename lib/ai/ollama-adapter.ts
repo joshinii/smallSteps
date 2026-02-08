@@ -1,35 +1,34 @@
-// SmallSteps LM Studio Adapter
+// SmallSteps Ollama Adapter
 // Implements AIProvider interface using server-side API proxy
 
 import type { AIProvider, GoalPlan, TaskPlan, EffortEstimate, ClarificationQuestion, ClarificationResult } from './ai-provider';
 
-export class LMStudioAdapter implements AIProvider {
-    readonly name = 'lmstudio';
-    readonly displayName = 'LM Studio (Local)';
+export class OllamaAdapter implements AIProvider {
+    readonly name = 'ollama';
+    readonly displayName = 'Ollama (Local)';
 
     async validateApiKey(): Promise<boolean> {
         try {
             await this.callAPI('estimateGoalEffort', { goalText: 'test' });
             return true;
         } catch (error) {
-            console.warn('LM Studio validation failed:', error);
+            console.warn('Ollama validation failed:', error);
             return false;
         }
     }
 
     private async callAPI(action: string, payload: any): Promise<string> {
         const startTime = Date.now();
-        console.log(`[LMStudioAdapter] Starting API call: ${action} at ${new Date().toISOString()}`);
+        console.log(`[OllamaAdapter] Starting API call: ${action} at ${new Date().toISOString()}`);
 
-        // Create AbortController with 5-minute timeout for slow local LLMs
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
-            console.warn(`[LMStudioAdapter] Aborting request due to 5m timeout`);
+            console.warn(`[OllamaAdapter] Aborting request due to 5m timeout`);
             controller.abort();
         }, 300000); // 5 minutes
 
         try {
-            const response = await fetch('/api/ai/lmstudio', {
+            const response = await fetch('/api/ai/ollama', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action, payload }),
@@ -40,17 +39,17 @@ export class LMStudioAdapter implements AIProvider {
 
             if (!response.ok) {
                 const error = await response.json();
-                console.error(`[LMStudioAdapter] API Error (${Date.now() - startTime}ms):`, error);
+                console.error(`[OllamaAdapter] API Error (${Date.now() - startTime}ms):`, error);
                 throw new Error(error.error || 'API call failed');
             }
 
             const data = await response.json();
-            console.log(`[LMStudioAdapter] Success (${Date.now() - startTime}ms):`, data.result?.substring(0, 50) + '...');
+            console.log(`[OllamaAdapter] Success (${Date.now() - startTime}ms):`, data.result?.substring(0, 50) + '...');
             return data.result;
         } catch (error) {
             clearTimeout(timeoutId);
             const duration = Date.now() - startTime;
-            console.error(`[LMStudioAdapter] Request failed after ${duration}ms:`, error);
+            console.error(`[OllamaAdapter] Request failed after ${duration}ms:`, error);
 
             if (error instanceof Error && error.name === 'AbortError') {
                 throw new Error('Request timed out after 5 minutes. Local LLM may be too slow.');
@@ -76,7 +75,7 @@ export class LMStudioAdapter implements AIProvider {
                 }))
             }));
         } catch (error) {
-            console.error('LM Studio clarifyGoal error:', error);
+            console.error('Ollama clarifyGoal error:', error);
             throw error;
         }
     }
@@ -92,11 +91,11 @@ export class LMStudioAdapter implements AIProvider {
                 tasks: (parsed.tasks || []).map((t: any) => ({
                     title: t.title || t.content,
                     estimatedTotalMinutes: t.estimatedTotalMinutes || t.estimatedMinutes || 120,
-                    whyThisMatters: t.whyThisMatters // Pass through quality field
+                    whyThisMatters: t.whyThisMatters
                 }))
             };
         } catch (error) {
-            console.error('LM Studio decomposeGoal error:', error);
+            console.error('Ollama decomposeGoal error:', error);
             throw error;
         }
     }
@@ -112,12 +111,12 @@ export class LMStudioAdapter implements AIProvider {
                     kind: u.kind || 'practice',
                     estimatedTotalMinutes: u.estimatedTotalMinutes || 60,
                     capabilityId: u.capabilityId,
-                    firstAction: u.firstAction,   // Pass through quality field
-                    successSignal: u.successSignal // Pass through quality field
+                    firstAction: u.firstAction,
+                    successSignal: u.successSignal
                 }))
             };
         } catch (error) {
-            console.error('LM Studio decomposeTask error:', error);
+            console.error('Ollama decomposeTask error:', error);
             throw error;
         }
     }
@@ -137,23 +136,16 @@ export class LMStudioAdapter implements AIProvider {
                 rationale: parsed.rationale,
             };
         } catch (error) {
-            console.error('LM Studio estimateGoalEffort error:', error);
+            console.error('Ollama estimateGoalEffort error:', error);
             return { estimatedTotalMinutes: 600, confidence: 'low' };
         }
     }
 
-    /**
-     * Generic completion support for Intelligent Planning
-     */
     async generateCompletion(prompt: string, options?: { temperature?: number, maxTokens?: number, jsonMode?: boolean }): Promise<string> {
-        // Reuse callAPI - treating 'generateCompletion' as a new action
-        // Note: The server-side route needs to support this 'action' too, 
-        // OR we can map it to 'decomposeGoal' if the server is dumb.
-        // Assuming we will update server route next.
         try {
             return await this.callAPI('generateCompletion', { prompt, ...options });
         } catch (error) {
-            console.error('LM Studio generateCompletion error:', error);
+            console.error('Ollama generateCompletion error:', error);
             throw error;
         }
     }

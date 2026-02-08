@@ -1,0 +1,26 @@
+{
+    "domain": "learning",
+    "displayName": "Learning & Education",
+    "description": "Academic study, skill acquisition, certifications",
+    "phases": [
+        "Orientation & Basics",
+        "Active Learning",
+        "Application & Practice",
+        "Mastery & Review"
+    ],
+    "keywords": [
+        "learn",
+        "study",
+        "course",
+        "certification",
+        "exam",
+        "language",
+        "read",
+        "book",
+        "tutorial",
+        "class",
+        "education",
+        "skill",
+        "master"
+    ]
+}

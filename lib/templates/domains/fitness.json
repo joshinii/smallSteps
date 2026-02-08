@@ -1,0 +1,27 @@
+{
+    "domain": "fitness",
+    "displayName": "Health & Fitness",
+    "description": "Exercise routines, physical health, sports skills",
+    "phases": [
+        "Foundation & Form",
+        "Building Consistency",
+        "Progressive Overload",
+        "Maintenance"
+    ],
+    "keywords": [
+        "fitness",
+        "exercise",
+        "workout",
+        "gym",
+        "running",
+        "strength",
+        "cardio",
+        "yoga",
+        "weight",
+        "muscle",
+        "health",
+        "sports",
+        "marathon",
+        "swimming"
+    ]
+}

@@ -60,14 +60,102 @@ function generateDefaultSuccessSignal(title: string, kind: string): string {
  * Parse AI response text, handling markdown code blocks
  */
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+/**
+ * Parse AI response text, robustly handling markdown code blocks and function call hallucinations
+ * Phi-3 often hallucinates function calls like save_content(title="foo"...) instead of pure JSON
+ */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 export function parseAIResponse(text: string): any {
-    const jsonText = text.includes('```json')
-        ? text.split('```json')[1].split('```')[0].trim()
-        : text.includes('```')
-            ? text.split('```')[1].split('```')[0].trim()
-            : text;
+    // 1. Extract JSON block if present
+    let cleanText = text.trim();
+    if (cleanText.includes('```json')) {
+        cleanText = cleanText.split('```json')[1].split('```')[0].trim();
+    } else if (cleanText.includes('```')) {
+        cleanText = cleanText.split('```')[1].split('```')[0].trim();
+    }
 
-    return JSON.parse(jsonText);
+    // 2. Fix common Phi-3 hallucinations (Function calls inside arrays)
+    // Converts: { "tasks": [ ..., save_content(title="X", ...), ... ] }
+    // To: Valid JSON objects
+    if (cleanText.includes('save_content(')) {
+        console.log('[Enforcement] Detected function call hallucination, attempting to fix...');
+
+        // Regex to match save_content(key="val", key=123) pattern
+        // This is a rough heuristic to convert python-style kwargs to JSON
+        cleanText = cleanText.replace(/save_content\((.*?)\)/g, (match, args) => {
+            try {
+                // Convert kwargs to JSON object string
+                // 1. Quote keys: title= -> "title":
+                // 2. Wrap in braces
+                let props = args
+                    .replace(/([a-zA-Z0-9_]+)=/g, '"$1":') // Quote keys
+                    .replace(/'/g, '"'); // Normalize quotes
+
+                return `{${props}}`;
+            } catch (e) {
+                return '{}'; // Fallback
+            }
+        });
+    }
+
+    // 3. Attempt parse
+    try {
+        return JSON.parse(cleanText);
+    } catch (e) {
+        console.warn('[Enforcement] JSON parse failed, attempting scavenger mode', e);
+        return { __scavenged: true }; // Marker to trigger scavenger in caller
+    }
+}
+
+/**
+ * Scavenge for valid task objects in raw text when main JSON parse fails.
+ * Uses stack-based brace matching to find all { ... } blocks (including nested ones)
+ * and checks if they look like task objects.
+ */
+function scavengeTasks(text: string): AITask[] {
+    const validTasks: AITask[] = [];
+    const openBraces: number[] = [];
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (inString) {
+            if (escape) {
+                escape = false;
+            } else if (char === '\\') {
+                escape = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+        } else {
+            if (char === '"') {
+                inString = true;
+            } else if (char === '{') {
+                openBraces.push(i);
+            } else if (char === '}') {
+                if (openBraces.length > 0) {
+                    const start = openBraces.pop()!;
+                    const block = text.substring(start, i + 1);
+                    try {
+                        const parsed = JSON.parse(block);
+                        if (parsed.title && typeof parsed.title === 'string') {
+                            // It looks like a task!
+                            validTasks.push({
+                                title: parsed.title,
+                                estimatedTotalMinutes: parsed.estimatedTotalMinutes || parsed.estimatedMinutes || 60,
+                                whyThisMatters: parsed.whyThisMatters
+                            });
+                        }
+                    } catch (ignore) {
+                        // Not a valid JSON object, keep scanning
+                    }
+                }
+            }
+        }
+    }
+
+    return validTasks;
 }
 
 /**
@@ -104,9 +192,27 @@ export function enforceTaskMinimums(tasks: AITask[]): AITask[] {
 export function processGoalDecomposition(rawText: string): string {
     try {
         const parsed = parseAIResponse(rawText);
-        const tasks = enforceTaskMinimums(parsed.tasks || []);
+        let tasks: AITask[] = [];
 
-        return JSON.stringify({ tasks });
+        if (parsed.__scavenged) {
+            console.log('[Enforcement] Main parse failed, scavenging for tasks...');
+            tasks = scavengeTasks(rawText);
+            console.log(`[Enforcement] Scavenged ${tasks.length} valid tasks`);
+        } else {
+            tasks = parsed.tasks || [];
+        }
+
+        // Final safety check: if still empty, try scavenging anyway if rawText is long
+        if (tasks.length === 0 && rawText.length > 100) {
+            const fallbackScavenge = scavengeTasks(rawText);
+            if (fallbackScavenge.length > 0) {
+                console.log('[Enforcement] Parsed result was empty, but scavenger found tasks. Using scavenged results.');
+                tasks = fallbackScavenge;
+            }
+        }
+
+        const enforced = enforceTaskMinimums(tasks);
+        return JSON.stringify({ tasks: enforced });
     } catch (e) {
         console.error('Failed to parse goal decomposition', e);
         return JSON.stringify({ tasks: [] });

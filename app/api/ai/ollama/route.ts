@@ -1,5 +1,5 @@
-// SmallSteps LM Studio API Route
-// Server-side proxy for local LLMs
+// SmallSteps Ollama API Route
+// Server-side proxy for local Ollama LLMs
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
@@ -14,7 +14,8 @@ import {
     processTaskDecomposition
 } from '@/lib/ai/enforcement';
 
-const DEFAULT_URL = process.env.LM_STUDIO_URL || 'http://localhost:1234/v1';
+// Default Ollama URL (can be overridden by env var)
+const DEFAULT_URL = process.env.OLLAMA_URL || 'http://localhost:11434/v1';
 
 // Configure Next.js route to allow longer execution for slow local LLMs
 export const maxDuration = 300; // 5 minutes
@@ -23,32 +24,32 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
     const startTime = Date.now();
     try {
-        const { action, payload, modelName = 'local-model' } = await request.json();
-        console.log(`[LM Studio API] Routing action: ${action} at ${new Date().toISOString()}`);
+        const { action, payload, modelName = 'qwen2.5-coder:7b' } = await request.json();
+        console.log(`[Ollama API] Routing action: ${action} at ${new Date().toISOString()}`);
 
         const client = new OpenAI({
             baseURL: DEFAULT_URL,
-            apiKey: 'lm-studio', // Not needed for local but required by SDK
+            apiKey: 'ollama', // Not needed for Ollama but required by SDK
             timeout: 300000, // 5 minutes timeout for slow local models
             maxRetries: 0, // Don't retry, just wait
         });
 
-        console.log(`[LM Studio API] Action: ${action}, Goal:`, payload.goalText?.substring(0, 50));
+        console.log(`[Ollama API] Action: ${action}, Goal:`, payload.goalText?.substring(0, 50));
 
         switch (action) {
             case 'clarifyGoal': {
                 const { goalText, traceId } = payload;
                 const prompt = getClarifyGoalPrompt(goalText);
 
-                console.log('[LM Studio API] Requesting clarification questions from OpenAI client...');
+                console.log('[Ollama API] Requesting clarification questions...');
                 const clientStart = Date.now();
                 const response = await client.chat.completions.create({
                     model: modelName,
                     messages: [{ role: 'user', content: prompt }],
                     temperature: 0.4,
-                    max_tokens: 1024, // Reduced from 4096 to speed up local generation
+                    max_tokens: 1024,
                 });
-                console.log(`[LM Studio API] OpenAI client returned in ${Date.now() - clientStart}ms`);
+                console.log(`[Ollama API] Client returned in ${Date.now() - clientStart}ms`);
 
                 const text = response.choices[0]?.message?.content?.trim() || '';
 
@@ -61,29 +62,23 @@ export async function POST(request: NextRequest) {
                             : text;
                     parsed = JSON.parse(jsonText);
                 } catch (parseError) {
-                    console.warn('[clarifyGoal] ⚠️ LM Studio returned invalid/incomplete JSON:', text.substring(0, 200));
-                    console.warn('[clarifyGoal] Parse error:', parseError);
+                    console.warn('[clarifyGoal] ⚠️ Ollama returned invalid/incomplete JSON:', text.substring(0, 200));
                     parsed = { questions: [] };
                 }
 
                 let questions = (parsed.questions || []).slice(0, 3);
 
-                // Validate that each question has valid options array with labels
+                // Basic validation
                 const hasInvalidQuestions = questions.some((q: any) =>
-                    !q.options || !Array.isArray(q.options) || q.options.length === 0 ||
-                    q.options.some((opt: any) => !opt.label || typeof opt.label !== 'string' || opt.label.trim() === '')
+                    !q.options || !Array.isArray(q.options) || q.options.length === 0
                 );
 
                 if (hasInvalidQuestions || questions.length === 0) {
-                    console.warn('[clarifyGoal] ⚠️ AI returned invalid/incomplete questions, using fallback defaults');
-                    console.warn('[clarifyGoal] Raw AI response:', text.substring(0, 300));
+                    console.warn('[clarifyGoal] ⚠️ Invalid questions, falling back to manual provider');
                     const { manualProvider } = await import('@/lib/ai/ai-provider');
                     questions = await manualProvider.clarifyGoal(goalText);
                 }
 
-                console.log('[clarifyGoal] Generated', questions.length, 'questions with',
-                    questions.map((q: any) => q.options?.length || 0).join('/'), 'options for goal:',
-                    goalText.substring(0, 50), traceId ? `(trace: ${traceId})` : '');
                 return NextResponse.json({ result: JSON.stringify({ questions }) });
             }
 
@@ -100,28 +95,6 @@ export async function POST(request: NextRequest) {
 
                 const text = response.choices[0]?.message?.content?.trim() || '';
                 const result = processGoalDecomposition(text);
-
-                // Log generated tasks for debugging
-                try {
-                    const parsed = JSON.parse(result);
-                    const taskTitles = (parsed.tasks || []).map((t: any) => t.title || t.content);
-                    console.log('[decomposeGoal] Goal:', goalText.substring(0, 50));
-                    console.log('[decomposeGoal] Generated tasks:', taskTitles);
-
-                    // Basic relevance check: warn if tasks seem off-topic
-                    const goalKeywords = goalText.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
-                    const possiblyIrrelevant = taskTitles.filter((title: string) => {
-                        const titleLower = title.toLowerCase();
-                        return !goalKeywords.some((keyword: string) => titleLower.includes(keyword));
-                    });
-
-                    if (possiblyIrrelevant.length > 0) {
-                        console.warn('[decomposeGoal] ⚠️  Possibly irrelevant tasks detected:', possiblyIrrelevant);
-                    }
-                } catch (e) {
-                    // Ignore parsing errors for logging
-                }
-
                 return NextResponse.json({ result });
             }
 
@@ -175,9 +148,9 @@ export async function POST(request: NextRequest) {
         }
 
     } catch (error: any) {
-        console.error('LM Studio API Error:', error);
+        console.error('Ollama API Error:', error);
         return NextResponse.json(
-            { error: error.message || 'Failed to communicate with LM Studio' },
+            { error: error.message || 'Failed to communicate with Ollama' },
             { status: 500 }
         );
     }

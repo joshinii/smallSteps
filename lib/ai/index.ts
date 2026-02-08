@@ -7,14 +7,15 @@ import { ClaudeAdapter } from './claude-adapter';
 import { GeminiAdapter } from './gemini-adapter';
 import { OpenAIAdapter } from './openai-adapter';
 import { LMStudioAdapter } from './lmstudio-adapter';
+import { OllamaAdapter } from './ollama-adapter';
 
-export type ProviderName = 'claude' | 'gemini' | 'openai' | 'lmstudio' | 'manual';
+export type ProviderName = 'claude' | 'gemini' | 'openai' | 'lmstudio' | 'ollama' | 'manual';
 
 /**
  * Providers that don't require an API key (local or manual)
  */
 export function isLocalProvider(provider: ProviderName): boolean {
-    return provider === 'manual' || provider === 'lmstudio';
+    return provider === 'manual' || provider === 'lmstudio' || provider === 'ollama';
 }
 
 /**
@@ -88,6 +89,11 @@ export function loadPersistedKeys(): void {
         apiKeys['lmstudio'] = 'local';
     }
 
+    // Always load Ollama marker (no consent needed for local config)
+    if (localStorage.getItem('smallsteps-ollama-configured') === 'true') {
+        apiKeys['ollama'] = 'local';
+    }
+
     // Load cloud provider keys only if consent given
     if (!hasStorageConsent()) return;
 
@@ -139,6 +145,12 @@ export function setApiKey(provider: ProviderName, key: string): void {
         if (typeof window !== 'undefined') {
             localStorage.setItem('smallsteps-lmstudio-configured', 'true');
         }
+    } else if (provider === 'ollama') {
+        apiKeys[provider] = 'local';
+        // Always persist Ollama since it's local and has no sensitive data
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('smallsteps-ollama-configured', 'true');
+        }
     } else {
         apiKeys[provider] = key;
     }
@@ -165,6 +177,10 @@ export function clearApiKey(provider: ProviderName): void {
     if (provider === 'lmstudio' && typeof window !== 'undefined') {
         localStorage.removeItem('smallsteps-lmstudio-configured');
     }
+    // Also clear Ollama marker if clearing ollama
+    if (provider === 'ollama' && typeof window !== 'undefined') {
+        localStorage.removeItem('smallsteps-ollama-configured');
+    }
     persistKeys(); // Update persisted storage
 }
 
@@ -188,6 +204,11 @@ export function getProvider(providerName: ProviderName): AIProvider {
     // LM Studio is local and doesn't need a key
     if (providerName === 'lmstudio') {
         return new LMStudioAdapter();
+    }
+
+    // Ollama is local and doesn't need a key
+    if (providerName === 'ollama') {
+        return new OllamaAdapter();
     }
 
     // Cloud providers require API keys
@@ -218,6 +239,12 @@ export async function validateProviderKey(providerName: ProviderName, key: strin
     // LM Studio validates by checking if server is reachable (no key needed)
     if (providerName === 'lmstudio') {
         const adapter = new LMStudioAdapter();
+        return await adapter.validateApiKey();
+    }
+
+    // Ollama validates by checking if server is reachable (no key needed)
+    if (providerName === 'ollama') {
+        const adapter = new OllamaAdapter();
         return await adapter.validateApiKey();
     }
 
@@ -261,6 +288,11 @@ export const PROVIDER_INFO: Record<ProviderName, { displayName: string; keyUrl: 
     },
     lmstudio: {
         displayName: 'LM Studio (Local)',
+        keyUrl: '',
+        placeholder: '',
+    },
+    ollama: {
+        displayName: 'Ollama (Local)',
         keyUrl: '',
         placeholder: '',
     },

@@ -16,7 +16,7 @@ import {
 import { generateId, getISOTimestamp } from './utils';
 
 const DB_NAME = 'smallsteps-db';
-const DB_VERSION = 4; // New version for effort-flow architecture
+const DB_VERSION = 5; // Bumped version for index repair
 
 // ============================================
 // Database Initialization
@@ -39,59 +39,66 @@ export async function getDB(): Promise<IDBDatabase> {
 
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result;
+            const tx = (event.target as IDBOpenDBRequest).transaction!;
+
+            // Helper to safe-get store
+            const getStore = (name: string, keyPath: string = 'id') => {
+                if (!db.objectStoreNames.contains(name)) {
+                    return db.createObjectStore(name, { keyPath });
+                }
+                return tx.objectStore(name);
+            };
 
             // Goals store
-            if (!db.objectStoreNames.contains('goals')) {
-                const goalsStore = db.createObjectStore('goals', { keyPath: 'id' });
+            const goalsStore = getStore('goals');
+            if (!goalsStore.indexNames.contains('status')) {
                 goalsStore.createIndex('status', 'status', { unique: false });
             }
 
-            // Tasks store (simplified)
-            if (!db.objectStoreNames.contains('tasks')) {
-                const tasksStore = db.createObjectStore('tasks', { keyPath: 'id' });
+            // Tasks store
+            const tasksStore = getStore('tasks');
+            if (!tasksStore.indexNames.contains('goalId')) {
                 tasksStore.createIndex('goalId', 'goalId', { unique: false });
             }
 
-            // WorkUnits store (NEW)
-            if (!db.objectStoreNames.contains('workUnits')) {
-                const workUnitsStore = db.createObjectStore('workUnits', { keyPath: 'id' });
+            // WorkUnits store
+            const workUnitsStore = getStore('workUnits');
+            if (!workUnitsStore.indexNames.contains('taskId')) {
                 workUnitsStore.createIndex('taskId', 'taskId', { unique: false });
             }
 
-            // Habits store (NEW - separate system)
-            if (!db.objectStoreNames.contains('habits')) {
-                db.createObjectStore('habits', { keyPath: 'id' });
-            }
+            // Habits store
+            getStore('habits');
 
-            // HabitLogs store (NEW)
-            if (!db.objectStoreNames.contains('habitLogs')) {
-                const logsStore = db.createObjectStore('habitLogs', { keyPath: 'id' });
+            // HabitLogs store
+            const logsStore = getStore('habitLogs');
+            if (!logsStore.indexNames.contains('habitId')) {
                 logsStore.createIndex('habitId', 'habitId', { unique: false });
+            }
+            if (!logsStore.indexNames.contains('date')) {
                 logsStore.createIndex('date', 'date', { unique: false });
+            }
+            if (!logsStore.indexNames.contains('habitId_date')) {
                 logsStore.createIndex('habitId_date', ['habitId', 'date'], { unique: true });
             }
 
             // Daily allocations store
-            if (!db.objectStoreNames.contains('dailyAllocations')) {
-                db.createObjectStore('dailyAllocations', { keyPath: 'date' });
-            }
+            getStore('dailyAllocations', 'date');
 
             // Task progress store
-            if (!db.objectStoreNames.contains('taskProgress')) {
-                const progressStore = db.createObjectStore('taskProgress', { keyPath: 'id' });
+            const progressStore = getStore('taskProgress');
+            if (!progressStore.indexNames.contains('workUnitId')) {
                 progressStore.createIndex('workUnitId', 'workUnitId', { unique: false });
+            }
+            if (!progressStore.indexNames.contains('date')) {
                 progressStore.createIndex('date', 'date', { unique: false });
             }
 
             // Daily moments store
-            if (!db.objectStoreNames.contains('dailyMoments')) {
-                db.createObjectStore('dailyMoments', { keyPath: 'date' });
-            }
+            getStore('dailyMoments', 'date');
 
             // AI settings store
-            if (!db.objectStoreNames.contains('settings')) {
-                db.createObjectStore('settings', { keyPath: 'id' });
-            }
+            getStore('settings');
         };
     });
 }
@@ -173,14 +180,15 @@ export const goalsDB = {
         return getByIndex<Goal>('goals', 'status', 'active');
     },
 
-    async create(data: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>): Promise<Goal> {
+    async create(data: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
         const goal: Goal = {
             ...data,
             id: generateId(),
             createdAt: getISOTimestamp(),
             updatedAt: getISOTimestamp(),
         };
-        return put('goals', goal);
+        await put('goals', goal);
+        return goal.id; // Return the generated ID
     },
 
     async update(id: string, data: Partial<Goal>): Promise<Goal | undefined> {

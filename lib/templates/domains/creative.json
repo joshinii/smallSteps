@@ -1,0 +1,30 @@
+{
+    "domain": "creative",
+    "displayName": "Creative & Artistic",
+    "description": "Art, music, writing, design projects",
+    "phases": [
+        "Inspiration & Setup",
+        "Skill Building",
+        "Creating & Iterating",
+        "Finishing & Sharing"
+    ],
+    "keywords": [
+        "art",
+        "music",
+        "write",
+        "writing",
+        "design",
+        "creative",
+        "draw",
+        "paint",
+        "compose",
+        "guitar",
+        "piano",
+        "photography",
+        "video",
+        "film",
+        "craft",
+        "novel",
+        "blog"
+    ]
+}

@@ -45,6 +45,8 @@ export interface ClarificationResult {
 export interface TaskSuggestion {
     title: string;
     estimatedTotalMinutes: number;
+    phase?: string; // Flexible phase name
+    complexity?: 1 | 2 | 3;
     whyThisMatters?: string; // Encouragement about what this milestone unlocks
     // Legacy support (will be phased out or handled in enforcement)
     content?: string;
@@ -108,6 +110,11 @@ export interface AIProvider {
      * Validate the API key (check connection/auth)
      */
     validateApiKey(): Promise<boolean>;
+    /**
+     * Optional: Generic completion for flexible prompting
+     * Required for Intelligent Planning features
+     */
+    generateCompletion?(prompt: string, options?: { temperature?: number, maxTokens?: number, jsonMode?: boolean }): Promise<string>;
 }
 
 /**
@@ -120,6 +127,13 @@ export class ManualProvider implements AIProvider {
 
     async validateApiKey(): Promise<boolean> {
         return true;
+    }
+
+    async generateCompletion(prompt: string): Promise<string> {
+        // Fallback for generic calls
+        // In manual mode, we might just return empty JSON or a polite stub
+        console.warn('ManualProvider: generateCompletion called but not fully supported. Returning empty JSON.');
+        return "{}";
     }
 
     async clarifyGoal(goalText: string): Promise<ClarificationQuestion[]> {

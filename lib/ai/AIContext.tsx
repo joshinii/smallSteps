@@ -31,12 +31,26 @@ export function AIContextProvider({ children }: { children: ReactNode }) {
     // Load persisted API keys on mount
     useEffect(() => {
         loadPersistedKeys();
-        // Check if any provider has a key after loading (lmstudio stores 'local' marker)
+
+        // Prioritize previous selection
+        const savedProvider = localStorage.getItem('smallsteps-ai-provider') as ProviderName;
+        if (savedProvider) {
+            // Local providers don't need API keys, cloud providers do
+            if (isLocalProvider(savedProvider) || hasApiKey(savedProvider)) {
+                setProviderState(savedProvider);
+                setIsConfigured(true);
+                return;
+            }
+        }
+
+        // Fallback: Check if any provider has a key after loading
         const providers: ProviderName[] = ['lmstudio', 'claude', 'gemini', 'openai'];
         for (const p of providers) {
             if (hasApiKey(p)) {
                 setProviderState(p);
                 setIsConfigured(true);
+                // Save this fallback choice so GoalCreator sees it
+                localStorage.setItem('smallsteps-ai-provider', p);
                 break;
             }
         }
@@ -44,13 +58,16 @@ export function AIContextProvider({ children }: { children: ReactNode }) {
 
     const setProvider = useCallback((name: ProviderName) => {
         setProviderState(name);
-        setIsConfigured(hasApiKey(name));
+        // Local providers are always "configured" (no key needed)
+        setIsConfigured(isLocalProvider(name) || hasApiKey(name));
+        localStorage.setItem('smallsteps-ai-provider', name);
     }, []);
 
     const configureProvider = useCallback((name: ProviderName, apiKey: string) => {
         setApiKey(name, apiKey);
         setProviderState(name);
         setIsConfigured(true);
+        localStorage.setItem('smallsteps-ai-provider', name);
         setShowSetupModal(false);
     }, []);
 

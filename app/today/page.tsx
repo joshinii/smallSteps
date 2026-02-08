@@ -1,88 +1,40 @@
 'use client';
 
-// SmallSteps Today Page - Redesigned
-// Ultra-clean focus view with minimal cognitive load
-// Architecture: Slices (Work) + Habits (Action)
+// SmallSteps Today Page - Calm Design
+// Ultra-minimal focus view with invisible intelligence
+// Philosophy: "Here's what matters today. That's all."
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-    generateDailyPlan,
-    regenerateDailyPlan,
-    completeSlice,
-    skipSlice,
-    addMoreSlices
-} from '@/lib/planning-engine';
-import type { DailyPlan, DayMode, Slice, Habit, HabitLog } from '@/lib/schema';
-import { getLocalDateString, formatEffortDisplay } from '@/lib/utils';
+import { useState, useEffect } from 'react';
+import { useDailyPlan, usePrefetchTomorrow } from '@/lib/hooks/useDailyPlan';
+import type { Slice, Habit, HabitLog } from '@/lib/schema';
+import { getLocalDateString } from '@/lib/utils';
 import { habitsDB, habitLogsDB } from '@/lib/db';
 
 export default function TodayPage() {
-    const [plan, setPlan] = useState<DailyPlan | null>(null);
-    const [loading, setLoading] = useState(true);
+    // Invisible plan management - caching, silent updates, auto-regeneration
+    const { slices, ready, completeWork, skipWork, getOneMoreThing } = useDailyPlan();
+
+    // Prefetch tomorrow's plan in background (30s after load)
+    usePrefetchTomorrow();
+
     const [habits, setHabits] = useState<Habit[]>([]);
     const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
-    const [selectedMode, setSelectedMode] = useState<DayMode>('medium');
-    const [showPresetModal, setShowPresetModal] = useState(false);
-    const [showCompleted, setShowCompleted] = useState(false);
-    const [completedSlices, setCompletedSlices] = useState<Slice[]>([]);
+    const [noMoreWork, setNoMoreWork] = useState(false);
+    const [addingMore, setAddingMore] = useState(false);
 
     const today = getLocalDateString();
-    const displayDate = new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-    });
 
-    const loadData = useCallback(async () => {
-        console.log('[DEBUG] loadData started, today:', today);
-        setLoading(true);
-        try {
-            // 1. Load Daily Plan (Slices)
-            const result = await generateDailyPlan(today);
-            setPlan(result.plan);
-
-            // 2. Load Habits (Separate System)
+    // Load habits (separate system)
+    useEffect(() => {
+        async function loadHabits() {
             const allHabits = await habitsDB.getAll();
             setHabits(allHabits);
 
             const logs = await habitLogsDB.getByDate(today);
             setHabitLogs(logs);
-
-        } catch (error) {
-            console.error('[DEBUG] Failed to load data:', error);
-        } finally {
-            setLoading(false);
         }
+        loadHabits();
     }, [today]);
-
-    // Initial load
-    useEffect(() => {
-        loadData();
-    }, [loadData]);
-
-    const handleCompleteSlice = async (slice: Slice) => {
-        // Optimistic update
-        if (plan) {
-            setPlan({
-                ...plan,
-                slices: plan.slices.filter(s => s.workUnitId !== slice.workUnitId)
-            });
-            setCompletedSlices([...completedSlices, slice]);
-        }
-
-        await completeSlice(slice);
-        await loadData(); // Reload to sync state
-    };
-
-    const handleSkipSlice = async (slice: Slice) => {
-        if (plan) {
-            setPlan({
-                ...plan,
-                slices: plan.slices.filter(s => s.workUnitId !== slice.workUnitId)
-            });
-        }
-        await skipSlice(slice);
-    };
 
     const handleToggleHabit = async (habitId: string) => {
         await habitLogsDB.toggleCompletion(habitId, today);
@@ -90,41 +42,26 @@ export default function TodayPage() {
         setHabitLogs(logs);
     };
 
-    const handleRegenerateWithMode = async () => {
-        setLoading(true);
-        try {
-            const result = await regenerateDailyPlan(today, selectedMode);
-            setPlan(result.plan);
-            setShowPresetModal(false);
-        } catch (error) {
-            console.error('Failed to regenerate plan:', error);
-        } finally {
-            setLoading(false);
+    // Gentle "one more thing" handler
+    const handleOneMoreThing = async () => {
+        setAddingMore(true);
+        const newSlice = await getOneMoreThing();
+        setAddingMore(false);
+
+        if (!newSlice) {
+            setNoMoreWork(true);
         }
     };
 
-    const handlePullMoreTasks = async () => {
-        if (!plan) return;
-        setLoading(true);
-        try {
-            const result = await addMoreSlices(today, plan, 45); // Add ~45 mins
-            setPlan(result);
-        } catch (error) {
-            console.error('Failed to pull more tasks:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (loading && !plan) {
+    // Loading state - calm skeleton (but avoid spinners per philosophy)
+    if (!ready) {
         return (
-            <div className="max-w-2xl mx-auto px-6 py-12">
-                <div className="animate-pulse space-y-4">
-                    <div className="h-8 bg-gray-100 rounded-xl w-1/3"></div>
-                    <div className="h-4 bg-gray-100 rounded w-1/2"></div>
-                    <div className="space-y-3 mt-8">
+            <div className="max-w-xl mx-auto px-6 py-16">
+                <div className="animate-pulse space-y-6">
+                    <div className="h-8 bg-slate-100 rounded w-24"></div>
+                    <div className="space-y-4">
                         {[1, 2, 3].map((i) => (
-                            <div key={i} className="h-24 bg-gray-50 rounded-2xl"></div>
+                            <div key={i} className="h-20 bg-slate-50 rounded-2xl"></div>
                         ))}
                     </div>
                 </div>
@@ -132,147 +69,81 @@ export default function TodayPage() {
         );
     }
 
-    const uncompletedSlices = plan?.slices || [];
-    const focusSlices = uncompletedSlices.slice(0, 3);
-    const queuedSlices = uncompletedSlices.slice(3);
+    const hasWork = slices.length > 0;
+    const hasHabits = habits.length > 0;
+    const isEmpty = !hasWork && !hasHabits;
 
     return (
-        <div className="max-w-2xl mx-auto px-6 py-8 animate-fadeIn">
-            {/* Header */}
+        <div className="max-w-xl mx-auto px-6 py-12">
+            {/* Simple Header - Just "Today" */}
             <header className="mb-10">
-                <h1 className="text-2xl font-light text-foreground mb-1">{displayDate}</h1>
-                <p className="text-sm text-muted">
-                    {uncompletedSlices.length === 0
-                        ? "You've done enough for today. Rest well."
-                        : `Here is a ${plan?.mode || 'gentle'} plan for today`}
-                </p>
+                <h1 className="text-2xl font-light text-foreground">Today</h1>
             </header>
 
-            {/* Adjust Plan Button */}
-            {!showPresetModal && uncompletedSlices.length > 0 && (
-                <button
-                    onClick={() => setShowPresetModal(true)}
-                    className="mb-6 text-sm text-muted hover:text-foreground transition-colors flex items-center gap-2"
-                >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                    </svg>
-                    Adjust mode
-                </button>
-            )}
-
-            {/* Mode Selection Modal */}
-            {showPresetModal && (
-                <div className="mb-6 p-5 bg-gray-50 border border-gray-200 rounded-xl animate-fadeIn space-y-4">
-                    <p className="text-sm text-foreground font-medium">Choose your day mode</p>
-                    <div className="grid grid-cols-3 gap-3">
-                        {(['light', 'medium', 'focus'] as DayMode[]).map((mode) => (
-                            <button
-                                key={mode}
-                                onClick={() => setSelectedMode(mode)}
-                                className={`p-4 rounded-lg border-2 text-left capitalize transition-all ${selectedMode === mode
-                                        ? 'border-accent bg-accent/5'
-                                        : 'border-gray-200 hover:border-gray-300 bg-white'
-                                    }`}
-                            >
-                                <div className="text-base mb-1">{mode}</div>
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={handleRegenerateWithMode}
-                            className="px-5 py-2.5 bg-foreground text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
-                        >
-                            Regenerate
-                        </button>
-                        <button
-                            onClick={() => setShowPresetModal(false)}
-                            className="px-4 py-2 text-muted hover:text-foreground rounded-lg transition-colors text-sm"
-                        >
-                            Cancel
-                        </button>
-                    </div>
+            {/* Work Items - Calm, breathable list */}
+            {hasWork && (
+                <div className="space-y-4 mb-12">
+                    {slices.map((slice) => (
+                        <WorkCard
+                            key={slice.workUnitId}
+                            slice={slice}
+                            onComplete={() => completeWork(slice)}
+                            onSkip={() => skipWork(slice)}
+                        />
+                    ))}
                 </div>
             )}
 
-            {/* 1️⃣ TODAY'S FOCUS (Slices) */}
-            {(focusSlices.length > 0 || queuedSlices.length > 0) && (
-                <div className="mb-12">
-                    <div className="mb-4">
-                        <h2 className="text-lg font-medium text-foreground">Today's Focus</h2>
-                        <p className="text-xs text-muted mt-1">Actions for today</p>
-                    </div>
+            {/* All done state - Gentle completion with optional continuation */}
+            {!hasWork && (hasHabits || !isEmpty) && (
+                <div className="mb-12 py-10 text-center">
+                    <p className="text-foreground font-light text-lg">
+                        All done for today
+                    </p>
+                    <p className="text-muted text-sm mt-1">
+                        {noMoreWork ? "That's all for now. Great work." : "Well done."}
+                    </p>
 
-                    <div className="space-y-3">
-                        {focusSlices.map((slice) => (
-                            <SliceCard
-                                key={slice.workUnitId}
-                                slice={slice}
-                                onComplete={() => handleCompleteSlice(slice)}
-                                onSkip={() => handleSkipSlice(slice)}
-                            />
-                        ))}
-                    </div>
-
-                    {queuedSlices.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-gray-100">
-                            <p className="text-xs text-muted mb-2">Up next</p>
-                            <div className="space-y-2 opacity-60">
-                                {queuedSlices.map((slice) => (
-                                    <SliceCard
-                                        key={slice.workUnitId}
-                                        slice={slice}
-                                        onComplete={() => handleCompleteSlice(slice)}
-                                        onSkip={() => handleSkipSlice(slice)}
-                                        compact
-                                    />
-                                ))}
-                            </div>
-                        </div>
+                    {/* Optional, subtle invitation - only if more work available */}
+                    {!noMoreWork && (
+                        <button
+                            onClick={handleOneMoreThing}
+                            disabled={addingMore}
+                            className="mt-6 text-sm text-muted/70 hover:text-muted transition-colors disabled:opacity-50"
+                        >
+                            {addingMore ? '...' : 'One more thing?'}
+                        </button>
                     )}
                 </div>
             )}
 
-            {/* "I have time for more" */}
-            {uncompletedSlices.length === 0 && !loading && (
-                <div className="mb-8 p-5 bg-green-50 border border-green-200 rounded-xl text-center">
-                    <p className="text-sm text-foreground mb-3">All scheduled actions complete!</p>
-                    <button
-                        onClick={handlePullMoreTasks}
-                        className="px-5 py-2.5 bg-accent text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
-                    >
-                        I have time for more
-                    </button>
-                </div>
-            )}
-
-            {/* 2️⃣ DAILY HABITS (Separate System) */}
-            {habits.length > 0 && (
-                <div className="mb-12">
-                    <div className="mb-3">
-                        <h2 className="text-base font-medium text-foreground">Daily Habits</h2>
-                        <p className="text-xs text-muted mt-1">Small consistencies</p>
-                    </div>
-                    <div className="space-y-2">
+            {/* Daily Habits - Subtle section */}
+            {hasHabits && (
+                <div className="pt-8 border-t border-slate-100">
+                    <h2 className="text-sm font-medium text-muted mb-4">Habits</h2>
+                    <div className="space-y-3">
                         {habits.map((habit) => {
                             const isDone = habitLogs.some(l => l.habitId === habit.id && l.completed);
                             return (
                                 <button
                                     key={habit.id}
                                     onClick={() => handleToggleHabit(habit.id)}
-                                    className={`flex items-center gap-3 py-2 w-full text-left transition-all ${isDone ? 'opacity-50' : 'hover:bg-gray-50 rounded-lg -ml-2 px-2'
+                                    className={`flex items-center gap-3 w-full text-left py-2 px-3 -mx-3 rounded-lg transition-colors ${isDone ? 'opacity-50' : 'hover:bg-slate-50'
                                         }`}
                                 >
-                                    <span className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${isDone ? 'bg-accent border-accent text-white' : 'border-gray-300'
+                                    <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isDone
+                                        ? 'bg-slate-400 border-slate-400 text-white'
+                                        : 'border-slate-300'
                                         }`}>
                                         {isDone && (
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
                                                 <polyline points="20 6 9 17 4 12" />
                                             </svg>
                                         )}
                                     </span>
-                                    <span className={isDone ? 'line-through text-muted' : ''}>{habit.title}</span>
+                                    <span className={isDone ? 'line-through text-muted' : 'text-foreground'}>
+                                        {habit.title}
+                                    </span>
                                 </button>
                             );
                         })}
@@ -280,33 +151,11 @@ export default function TodayPage() {
                 </div>
             )}
 
-            {/* Completed Slices History */}
-            {completedSlices.length > 0 && (
-                <div className="pt-8 border-t border-gray-100">
-                    <button
-                        onClick={() => setShowCompleted(!showCompleted)}
-                        className="text-sm text-muted/60 hover:text-muted transition-colors flex items-center gap-2"
-                    >
-                        {completedSlices.length} completed actions
-                    </button>
-                    {showCompleted && (
-                        <div className="mt-3 space-y-2">
-                            {completedSlices.map((s, i) => (
-                                <div key={i} className="text-sm text-muted flex justify-between">
-                                    <span className="line-through opacity-70">{s.workUnit.title}</span>
-                                    <span className="text-xs">{s.minutes}m</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Empty State */}
-            {uncompletedSlices.length === 0 && habits.length === 0 && (
-                <div className="text-center py-16 border-2 border-dashed border-gray-100 rounded-2xl">
+            {/* Empty State - Calm, encouraging */}
+            {isEmpty && (
+                <div className="py-16 text-center">
                     <p className="text-lg text-muted font-light">Your day is open.</p>
-                    <p className="text-sm text-muted mt-2">Create a goal to get started.</p>
+                    <p className="text-sm text-muted/70 mt-2">Create a goal to get started.</p>
                 </div>
             )}
         </div>
@@ -314,61 +163,54 @@ export default function TodayPage() {
 }
 
 // ============================================
-// Slice Card Component
+// Work Card - Minimal, calm presentation
 // ============================================
 
-interface SliceCardProps {
+interface WorkCardProps {
     slice: Slice;
     onComplete: () => void;
     onSkip: () => void;
-    compact?: boolean;
 }
 
-function SliceCard({ slice, onComplete, onSkip, compact }: SliceCardProps) {
+function WorkCard({ slice, onComplete, onSkip }: WorkCardProps) {
     return (
-        <div className={`bg-white border border-gray-200 rounded-xl transition-all ${compact ? 'p-3' : 'p-4'
-            }`}>
-            <div className="flex justify-between items-start">
-                <div className="flex-1">
-                    <p className={`font-medium ${compact ? 'text-sm' : 'text-base'}`}>
-                        {slice.workUnit.title}
-                    </p>
-                    <p className="text-xs text-muted mt-1">
-                        {slice.label} · {slice.minutes} min · {slice.task.title}
-                    </p>
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 transition-all hover:border-slate-300">
+            {/* Title */}
+            <p className="font-medium text-foreground leading-snug">
+                {slice.workUnit.title}
+            </p>
 
-                    {/* Quality guidance - show first action and success signal */}
-                    {!compact && slice.workUnit.firstAction && (
-                        <p className="text-sm text-gray-600 mt-3 flex items-start gap-2">
-                            <span className="text-green-600 flex-shrink-0">→</span>
-                            <span>Start: {slice.workUnit.firstAction}</span>
-                        </p>
-                    )}
-                    {!compact && slice.workUnit.successSignal && (
-                        <p className="text-sm text-gray-500 mt-1 flex items-start gap-2">
-                            <span className="text-blue-600 flex-shrink-0">✓</span>
-                            <span>Done when: {slice.workUnit.successSignal}</span>
-                        </p>
-                    )}
-                </div>
-            </div>
+            {/* Goal context - Subtle */}
+            <p className="text-xs text-muted mt-1.5">
+                {slice.goal.title}
+            </p>
 
-            {!compact && (
-                <div className="flex items-center gap-2 mt-3">
-                    <button
-                        onClick={onComplete}
-                        className="px-4 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
-                    >
-                        Done
-                    </button>
-                    <button
-                        onClick={onSkip}
-                        className="ml-auto px-3 py-1.5 text-muted/60 hover:text-muted rounded-lg transition-colors text-sm"
-                    >
-                        Not today
-                    </button>
-                </div>
+            {/* First action - Reduce activation energy */}
+            {slice.workUnit.firstAction && (
+                <p className="text-sm text-slate-600 mt-4 flex items-start gap-2">
+                    <span className="text-slate-400 flex-shrink-0">→</span>
+                    <span>{slice.workUnit.firstAction}</span>
+                </p>
             )}
+
+            {/* Simple actions */}
+            <div className="flex items-center gap-3 mt-5">
+                <button
+                    onClick={onComplete}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors text-sm font-medium"
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Done
+                </button>
+                <button
+                    onClick={onSkip}
+                    className="px-3 py-2 text-muted hover:text-foreground transition-colors text-sm"
+                >
+                    Not today
+                </button>
+            </div>
         </div>
     );
 }
