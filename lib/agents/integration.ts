@@ -18,8 +18,7 @@ export interface CreateGoalResult {
 export interface CreateGoalOptions {
     /** Additional goal data to merge */
     goalData?: Partial<Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>>;
-    /** Total estimated minutes for the goal (auto-calculated if not provided) */
-    totalEstimatedMinutes?: number;
+    // TIME ESTIMATION REMOVED - No longer calculating estimated completion
 }
 
 // ============================================
@@ -43,10 +42,8 @@ export async function createGoalFromBreakdown(
     options: CreateGoalOptions = {}
 ): Promise<CreateGoalResult> {
     console.log('💾 INTEGRATION: Creating goal from breakdown:', goalTitle);
-
-    // Calculate total estimated minutes (for reference, goal doesn't store this)
-    const totalEstimatedMinutes = breakdown.tasks.reduce((sum, t) => sum + t.estimatedTotalMinutes, 0);
-    console.log(`💾 INTEGRATION: Total estimated minutes: ${totalEstimatedMinutes}`);
+    // TIME ESTIMATION REMOVED - Focus on structure, not time pressure
+    console.log(`💾 INTEGRATION: ${breakdown.tasks.length} tasks, ${breakdown.workUnits.length} work units`);
 
     // 1. Create Goal (only use fields that exist in Goal schema)
     const goalId = await goalsDB.create({
@@ -69,11 +66,11 @@ export async function createGoalFromBreakdown(
         const task = await tasksDB.create({
             goalId: goal.id,
             title: taskData.title,
-            estimatedTotalMinutes: taskData.estimatedTotalMinutes,
+            // TIME ESTIMATION REMOVED - No estimatedTotalMinutes
             completedMinutes: 0,
             order: taskData.order,
             phase: taskData.phase,
-            complexity: taskData.complexity ?? estimateComplexity(taskData.estimatedTotalMinutes),
+            complexity: taskData.complexity ?? 2, // Default to moderate
             whyThisMatters: taskData.whyThisMatters,
         });
 
@@ -97,7 +94,7 @@ export async function createGoalFromBreakdown(
         const workUnit = await workUnitsDB.create({
             taskId: parentTask.id,
             title: wuData.title,
-            estimatedTotalMinutes: wuData.estimatedTotalMinutes,
+            // TIME ESTIMATION REMOVED - No estimatedTotalMinutes
             completedMinutes: 0,
             kind: wuData.kind,
             capabilityId: wuData.capabilityId,
@@ -146,21 +143,11 @@ export async function rollbackGoalCreation(goalId: string): Promise<void> {
 // ============================================
 
 /**
- * Estimate complexity based on time
+ * Estimate complexity (no longer time-based)
+ * TIME ESTIMATION REMOVED - Default to moderate complexity
  */
-function estimateComplexity(minutes: number): 1 | 2 | 3 {
-    if (minutes <= 120) return 1;
-    if (minutes <= 300) return 2;
-    return 3;
-}
-
-/**
- * Estimate effort level based on total goal time
- */
-function estimateEffortLevel(totalMinutes: number): 'light' | 'medium' | 'heavy' {
-    if (totalMinutes <= 240) return 'light';      // Up to 4 hours
-    if (totalMinutes <= 600) return 'medium';     // Up to 10 hours
-    return 'heavy';                                // More than 10 hours
+function estimateComplexity(): 1 | 2 | 3 {
+    return 2; // Default to moderate
 }
 
 // ============================================

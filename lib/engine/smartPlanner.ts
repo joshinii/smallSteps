@@ -25,15 +25,16 @@ export function selectOptimalTasks(
 
     // 1. Calculate Priority for all tasks
     // This gives us the "Value" (profit) for the knapsack
+    // TIME ESTIMATION REMOVED - use defaults
     const items = tasks.map(task => {
         const goal = goals[task.goalId];
         // If goal not found (orphaned task), give 0 priority
-        if (!goal) return { task, weight: task.estimatedTotalMinutes, value: 0 };
+        if (!goal) return { task, weight: task.estimatedTotalMinutes ?? 60, value: 0 };
 
         const priority = calculateTaskPriority(task, goal);
         return {
             task,
-            weight: Math.max(5, task.estimatedTotalMinutes), // Minimum 5 min cost
+            weight: Math.max(5, task.estimatedTotalMinutes ?? 60), // Minimum 5 min cost
             value: priority.totalScore
         };
     });

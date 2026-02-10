@@ -105,16 +105,17 @@ export function selectDailyTasks(
     }
 
     // Sort by priority (incomplete tasks with least progress first)
+    // TIME ESTIMATION REMOVED - use defaults
     const sortedTasks = [...incompleteTasks].sort((a, b) => {
-        const progressA = a.completedMinutes / a.estimatedTotalMinutes;
-        const progressB = b.completedMinutes / b.estimatedTotalMinutes;
+        const progressA = a.completedMinutes / (a.estimatedTotalMinutes ?? 60);
+        const progressB = b.completedMinutes / (b.estimatedTotalMinutes ?? 60);
         return progressA - progressB;
     });
 
-    // Categorize tasks by effort
-    const heavy = sortedTasks.filter(t => getEffortCategory(t.estimatedTotalMinutes - t.completedMinutes) === 'heavy');
-    const medium = sortedTasks.filter(t => getEffortCategory(t.estimatedTotalMinutes - t.completedMinutes) === 'medium');
-    const light = sortedTasks.filter(t => getEffortCategory(t.estimatedTotalMinutes - t.completedMinutes) === 'light');
+    // Categorize tasks by effort - TIME ESTIMATION REMOVED, use defaults
+    const heavy = sortedTasks.filter(t => getEffortCategory((t.estimatedTotalMinutes ?? 60) - t.completedMinutes) === 'heavy');
+    const medium = sortedTasks.filter(t => getEffortCategory((t.estimatedTotalMinutes ?? 60) - t.completedMinutes) === 'medium');
+    const light = sortedTasks.filter(t => getEffortCategory((t.estimatedTotalMinutes ?? 60) - t.completedMinutes) === 'light');
 
     // Selection algorithm
     const selected: Task[] = [];
@@ -125,7 +126,7 @@ export function selectDailyTasks(
     if (heavy.length > 0 && remainingCapacity >= 180) {
         const task = heavy[0];
         selected.push(task);
-        const effort = Math.min(task.estimatedTotalMinutes - task.completedMinutes, remainingCapacity);
+        const effort = Math.min((task.estimatedTotalMinutes ?? 60) - task.completedMinutes, remainingCapacity);
         remainingCapacity -= effort;
         distribution.heavy++;
     }
@@ -133,7 +134,7 @@ export function selectDailyTasks(
     // 2. Fill with medium tasks (up to 2-3)
     for (const task of medium) {
         if (selected.length >= 5) break;
-        const effortNeeded = task.estimatedTotalMinutes - task.completedMinutes;
+        const effortNeeded = (task.estimatedTotalMinutes ?? 60) - task.completedMinutes;
         if (effortNeeded <= remainingCapacity) {
             selected.push(task);
             remainingCapacity -= effortNeeded;
@@ -144,7 +145,7 @@ export function selectDailyTasks(
     // 3. Fill with light tasks (up to 3-4)
     for (const task of light) {
         if (selected.length >= 6) break;
-        const effortNeeded = task.estimatedTotalMinutes - task.completedMinutes;
+        const effortNeeded = (task.estimatedTotalMinutes ?? 60) - task.completedMinutes;
         if (effortNeeded <= remainingCapacity) {
             selected.push(task);
             remainingCapacity -= effortNeeded;
@@ -162,7 +163,7 @@ export function selectDailyTasks(
     }
 
     const totalMinutes = selected.reduce((sum, task) => {
-        return sum + Math.min(task.estimatedTotalMinutes - task.completedMinutes, userCapacity);
+        return sum + Math.min((task.estimatedTotalMinutes ?? 60) - task.completedMinutes, userCapacity);
     }, 0);
 
     // Generate encouraging message

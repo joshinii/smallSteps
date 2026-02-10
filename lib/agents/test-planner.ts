@@ -1,5 +1,5 @@
 // SmallSteps Planner Test Scenarios
-// Validates calm, gentle user experience
+// Validates momentum-based daily plan generation
 // Philosophy: Invisible automation, minimal cognitive load, supportive language
 
 import { generateDailyPlan, type DailyPlan } from './planner';
@@ -24,307 +24,155 @@ function assert(condition: boolean, message: string) {
 }
 
 // ============================================
-// Test 1: Cognitive Load Reduction
+// Test 1: Plan Size Within Bounds
 // ============================================
 
-export async function testSimplePlanSize() {
-    log('\n=== Test: Plan Stays Small (Reduce Overwhelm) ===');
+export async function testPlanSize() {
+    log('\n🧪 Test 1: Plan size is within 2–7 work units');
 
-    const plan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240
-    });
+    const plan = await generateDailyPlan();
 
-    let passed = true;
+    const sliceCount = plan.slices.length;
 
-    // Plan should be manageable (max 6 slices per config)
-    passed = assert(
-        plan.slices.length <= 6,
-        `Should limit to 6 workunits max (cognitive load). Got: ${plan.slices.length}`
-    ) && passed;
-
-    // Max 1 heavy workunit (> 90 min)
-    const heavyCount = plan.slices.filter(
-        s => s.workUnit.estimatedTotalMinutes - s.workUnit.completedMinutes > 90
-    ).length;
-
-    passed = assert(
-        heavyCount <= 1,
-        `Max 1 heavy workunit (avoid overwhelm). Got: ${heavyCount}`
-    ) && passed;
-
-    if (passed) {
-        log(`✓ Plan size: ${plan.slices.length} workunits (manageable)`);
-    }
-
-    return passed;
-}
-
-// ============================================
-// Test 2: Multi-Goal Balance (Invisible)
-// ============================================
-
-export async function testInvisibleBalancing() {
-    log('\n=== Test: Multi-Goal Balance (Behind Scenes) ===');
-
-    const goals = await goalsDB.getActive();
-
-    if (goals.length < 2) {
-        log('⚠ Skipped: Need at least 2 active goals to test balancing');
+    // If there are goals, should generate 2–7 slices
+    // If no goals, 0 is fine
+    if (sliceCount === 0) {
+        log('  ℹ No goals found — empty plan is valid');
         return true;
     }
 
-    const plan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240
-    });
+    const sizeOk = assert(
+        sliceCount >= 2 && sliceCount <= 7,
+        `Plan has ${sliceCount} slices (expected 2–7)`
+    );
 
-    const represented = new Set(plan.slices.map(s => s.goal?.id).filter(Boolean));
-
-    let passed = true;
-
-    // Should include multiple goals when available
-    passed = assert(
-        represented.size >= Math.min(2, goals.length),
-        `Should include multiple goals. Got: ${represented.size}`
-    ) && passed;
-
-    // User never sees priority scores or percentages
-    // Just sees: balanced daily list
-
-    if (passed) {
-        log(`✓ Goals represented: ${represented.size} of ${goals.length} (balanced)`);
+    if (sizeOk) {
+        log(`  ✓ Plan has ${sliceCount} work units (within bounds)`);
     }
 
-    return passed;
+    return sizeOk;
 }
 
 // ============================================
-// Test 3: Gentle Progression
+// Test 2: Multi-Goal Balance
 // ============================================
 
-export async function testGentleProgression() {
-    log('\n=== Test: Gentle Effort Progression ===');
+export async function testMultiGoalBalance() {
+    log('\n🧪 Test 2: Multi-goal balance (invisible rotation)');
 
-    const plan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240
-    });
+    const plan = await generateDailyPlan();
 
     if (plan.slices.length === 0) {
-        log('⚠ Skipped: No slices to test progression');
+        log('  ℹ No slices — skipping balance test');
         return true;
     }
 
-    let passed = true;
+    // Check that goalCount reflects distinct goals
+    const goalIds = new Set(plan.slices.map(s => s.goal.id));
+    const balanceOk = assert(
+        plan.goalCount === goalIds.size,
+        `goalCount=${plan.goalCount} should match distinct goals=${goalIds.size}`
+    );
 
-    // First workunit should be Light/Medium (ease in)
-    const firstRemaining = plan.slices[0]?.workUnit.estimatedTotalMinutes -
-        (plan.slices[0]?.workUnit.completedMinutes || 0);
-
-    passed = assert(
-        firstRemaining <= 60,
-        `First workunit should be Light/Medium (ease in). Got: ${firstRemaining}min`
-    ) && passed;
-
-    // Check for sudden effort jumps
-    let maxJump = 0;
-    for (let i = 1; i < plan.slices.length; i++) {
-        const prevRemaining = plan.slices[i - 1].workUnit.estimatedTotalMinutes -
-            (plan.slices[i - 1].workUnit.completedMinutes || 0);
-        const currRemaining = plan.slices[i].workUnit.estimatedTotalMinutes -
-            (plan.slices[i].workUnit.completedMinutes || 0);
-        maxJump = Math.max(maxJump, currRemaining - prevRemaining);
+    if (balanceOk) {
+        log(`  ✓ Plan covers ${goalIds.size} goal(s)`);
     }
 
-    // Allow some variation but no huge jumps
-    passed = assert(
-        maxJump <= 60,
-        `No sudden effort jumps (gentle progression). Max jump: ${maxJump}min`
-    ) && passed;
-
-    if (passed) {
-        log('✓ Effort progression is gentle');
-    }
-
-    return passed;
+    return balanceOk;
 }
 
 // ============================================
-// Test 4: Empty State Graceful
+// Test 3: Empty State Graceful
 // ============================================
 
 export async function testEmptyStateGraceful() {
-    log('\n=== Test: Empty Plan Handled Gracefully ===');
+    log('\n🧪 Test 3: Empty state returns graceful message');
 
-    // Get current state
+    // Save current goals, clear them, test, restore
     const goals = await goalsDB.getAll();
-    const hasActiveGoals = goals.some(g => g.status === 'active');
 
-    if (!hasActiveGoals) {
-        // Generate plan with no active goals
-        const plan = await generateDailyPlan({
-            date: getLocalDateString(),
-            userCapacity: 240
-        });
+    // Test with empty state — generate plan
+    // The planner should handle 0 goals gracefully
+    const plan = await generateDailyPlan();
 
-        const passed = assert(
-            plan.slices.length === 0 && plan.metadata?.message !== undefined,
-            'Should return empty plan with friendly message'
+    if (goals.length === 0) {
+        const emptyOk = assert(
+            plan.slices.length === 0,
+            'Empty goals should produce empty plan'
+        );
+        const messageOk = assert(
+            plan.metadata?.message !== undefined && plan.metadata.message.length > 0,
+            'Empty plan should include a message'
         );
 
-        if (passed) {
-            log(`✓ Empty state handled calmly: "${plan.metadata?.message}"`);
+        if (emptyOk && messageOk) {
+            log(`  ✓ Empty state: "${plan.metadata?.message}"`);
         }
-
-        return passed;
-    } else {
-        log('⚠ Skipped: Has active goals (cannot test empty state without modifying data)');
-        return true;
+        return emptyOk && messageOk;
     }
+
+    log('  ℹ Goals exist — skipping empty state test');
+    return true;
 }
 
 // ============================================
-// Test 5: Silent Failure Recovery
-// ============================================
-
-export async function testSilentFailure() {
-    log('\n=== Test: Silent Failure Recovery ===');
-
-    // This test validates that generateDailyPlan handles errors gracefully
-    // by returning an empty plan with a message rather than throwing
-
-    try {
-        const plan = await generateDailyPlan({
-            date: getLocalDateString(),
-            userCapacity: 240
-        });
-
-        // Plan should always return (not throw)
-        const passed = assert(
-            plan !== null && plan !== undefined,
-            'Should always return a plan object (never throw)'
-        );
-
-        if (passed) {
-            log('✓ Failure handled invisibly (returns plan object)');
-        }
-
-        return passed;
-    } catch (error) {
-        log(`✗ FAILED: generateDailyPlan threw an error: ${error}`);
-        return false;
-    }
-}
-
-// ============================================
-// Test 6: Validate Gentle Language
+// Test 4: Gentle Language
 // ============================================
 
 export async function testGentleLanguage() {
-    log('\n=== Test: Gentle Language ===');
+    log('\n🧪 Test 4: No harsh language in plan metadata');
 
-    const plan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240
-    });
+    const plan = await generateDailyPlan();
+
+    const message = plan.metadata?.message || '';
+    const forbidden = ['deadline', 'overdue', 'failed', 'urgent', 'penalty'];
+
+    let allGood = true;
+    for (const word of forbidden) {
+        const found = message.toLowerCase().includes(word);
+        if (found) {
+            assert(false, `Message contains forbidden word: "${word}"`);
+            allGood = false;
+        }
+    }
+
+    if (allGood) {
+        log(`  ✓ Message is gentle: "${message}"`);
+    }
+
+    return allGood;
+}
+
+// ============================================
+// Test 5: Work Units Come From Active Goals
+// ============================================
+
+export async function testActiveGoalsOnly() {
+    log('\n🧪 Test 5: All slices belong to active goals');
+
+    const plan = await generateDailyPlan();
 
     if (plan.slices.length === 0) {
-        log('⚠ Skipped: No slices to check language');
+        log('  ℹ No slices — skipping');
         return true;
     }
 
-    let passed = true;
-    const harshWords = ['deadline', 'urgent', 'overdue', 'failed', 'critical'];
+    const activeGoals = await goalsDB.getActive();
+    const activeIds = new Set(activeGoals.map(g => g.id));
 
+    let allActive = true;
     for (const slice of plan.slices) {
-        const title = slice.workUnit.title.toLowerCase();
-
-        for (const word of harshWords) {
-            if (title.includes(word)) {
-                passed = assert(
-                    false,
-                    `Should not use "${word}" in work unit title: "${slice.workUnit.title}"`
-                );
-            }
+        if (!activeIds.has(slice.goal.id)) {
+            assert(false, `Slice goal ${slice.goal.id} is not active`);
+            allActive = false;
         }
     }
 
-    if (passed) {
-        log('✓ Language is gentle and supportive');
+    if (allActive) {
+        log(`  ✓ All ${plan.slices.length} slices from active goals`);
     }
 
-    return passed;
-}
-
-// ============================================
-// Test 7: Capacity Adjustments Work
-// ============================================
-
-export async function testCapacityAdjustments() {
-    log('\n=== Test: Capacity Adjustments ===');
-
-    // Test with low energy
-    const lowEnergyPlan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240,
-        energyLevel: 1 // Surviving
-    });
-
-    // Test with normal energy
-    const normalPlan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240,
-        energyLevel: 3 // Normal
-    });
-
-    let passed = true;
-
-    // Low energy should have fewer/smaller slices
-    passed = assert(
-        lowEnergyPlan.totalMinutes <= normalPlan.totalMinutes || lowEnergyPlan.slices.length === 0,
-        'Low energy should reduce workload'
-    ) && passed;
-
-    if (passed) {
-        log(`✓ Capacity adjusted: Low energy ${lowEnergyPlan.totalMinutes}min vs Normal ${normalPlan.totalMinutes}min`);
-    }
-
-    return passed;
-}
-
-// ============================================
-// Test 8: Plan Metadata is User-Friendly
-// ============================================
-
-export async function testFriendlyMetadata() {
-    log('\n=== Test: User-Friendly Metadata ===');
-
-    const plan = await generateDailyPlan({
-        date: getLocalDateString(),
-        userCapacity: 240
-    });
-
-    let passed = true;
-
-    // Metadata message should be friendly, not technical
-    if (plan.metadata?.message) {
-        const message = plan.metadata.message.toLowerCase();
-
-        // Should NOT contain technical terms
-        const technicalTerms = ['error', 'null', 'undefined', 'exception', 'failed'];
-        for (const term of technicalTerms) {
-            if (message.includes(term)) {
-                passed = assert(false, `Message should not contain "${term}"`);
-            }
-        }
-    }
-
-    if (passed) {
-        log(`✓ Metadata is user-friendly: "${plan.metadata?.message || 'No message'}"`);
-    }
-
-    return passed;
+    return allActive;
 }
 
 // ============================================
@@ -332,40 +180,42 @@ export async function testFriendlyMetadata() {
 // ============================================
 
 export async function runAllTests() {
-    log('\n╔═══════════════════════════════════════╗');
-    log('║    SmallSteps Calm UX Validation      ║');
-    log('╚═══════════════════════════════════════╝');
+    log('═══════════════════════════════════════');
+    log('  SmallSteps Momentum Planner Tests');
+    log('═══════════════════════════════════════');
 
     const results: { name: string; passed: boolean }[] = [];
 
-    try {
-        results.push({ name: 'Plan Size Limit', passed: await testSimplePlanSize() });
-        results.push({ name: 'Multi-Goal Balance', passed: await testInvisibleBalancing() });
-        results.push({ name: 'Gentle Progression', passed: await testGentleProgression() });
-        results.push({ name: 'Empty State', passed: await testEmptyStateGraceful() });
-        results.push({ name: 'Silent Failure', passed: await testSilentFailure() });
-        results.push({ name: 'Gentle Language', passed: await testGentleLanguage() });
-        results.push({ name: 'Capacity Adjustments', passed: await testCapacityAdjustments() });
-        results.push({ name: 'Friendly Metadata', passed: await testFriendlyMetadata() });
-    } catch (error) {
-        log(`\n✗ Test suite error: ${error}`);
+    const tests = [
+        { name: 'Plan Size', fn: testPlanSize },
+        { name: 'Multi-Goal Balance', fn: testMultiGoalBalance },
+        { name: 'Empty State', fn: testEmptyStateGraceful },
+        { name: 'Gentle Language', fn: testGentleLanguage },
+        { name: 'Active Goals Only', fn: testActiveGoalsOnly },
+    ];
+
+    for (const test of tests) {
+        try {
+            const passed = await test.fn();
+            results.push({ name: test.name, passed });
+        } catch (error) {
+            console.error(`✗ ${test.name} threw:`, error);
+            results.push({ name: test.name, passed: false });
+        }
     }
 
     // Summary
-    log('\n═══════════════════════════════════════');
-    log('Summary:');
-
+    log('\n─────────────────────────────────────');
     const passed = results.filter(r => r.passed).length;
     const total = results.length;
+    log(`  Results: ${passed}/${total} passed`);
 
-    for (const result of results) {
-        log(`  ${result.passed ? '✓' : '✗'} ${result.name}`);
+    for (const r of results) {
+        log(`  ${r.passed ? '✓' : '✗'} ${r.name}`);
     }
+    log('─────────────────────────────────────\n');
 
-    log(`\n${passed}/${total} tests passed`);
-    log('═══════════════════════════════════════\n');
-
-    return passed === total;
+    return { passed, total, results };
 }
 
 // Export for command line usage

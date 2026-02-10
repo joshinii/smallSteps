@@ -57,14 +57,17 @@ export function minutesToEffortLabel(minutes: number): SliceLabel {
     return 'dive';
 }
 
+// TIME ESTIMATION REMOVED - use defaults for optional time fields
 export function isTaskEffectivelyComplete(task: Task): boolean {
-    if (task.estimatedTotalMinutes === 0) return false;
-    return task.completedMinutes >= task.estimatedTotalMinutes * COMPLETION_THRESHOLD;
+    const estimated = task.estimatedTotalMinutes ?? 60;
+    if (estimated === 0) return false;
+    return task.completedMinutes >= estimated * COMPLETION_THRESHOLD;
 }
 
 export function getTaskProgressPercentage(task: Task): number {
-    if (task.estimatedTotalMinutes === 0) return 0;
-    return Math.min(100, (task.completedMinutes / task.estimatedTotalMinutes) * 100);
+    const estimated = task.estimatedTotalMinutes ?? 60;
+    if (estimated === 0) return 0;
+    return Math.min(100, (task.completedMinutes / estimated) * 100);
 }
 
 /**

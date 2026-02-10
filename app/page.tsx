@@ -14,53 +14,7 @@ import EmptyState from '@/components/EmptyState';
 
 // --- TaskItem Component (Calm Design) ---
 // Updated to use new Task schema
-const TaskItem = ({
-    task,
-    goalId,
-    onComplete,
-}: {
-    task: Task,
-    goalId: string,
-    onComplete: () => void,
-}) => {
-    const isComplete = isTaskEffectivelyComplete(task);
-    const progress = (task.completedMinutes / (task.estimatedTotalMinutes || 1)) * 100;
-
-    return (
-        <div className={`p-3 rounded-lg border bg-white hover:shadow-sm hover:border-gray-300 transition-all duration-200 ${isComplete ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
-            <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-3">
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onComplete();
-                            }}
-                            className={`mt-1 flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${isComplete
-                                ? 'bg-green-500 border-green-500 text-white'
-                                : 'border-gray-300 hover:border-green-500 text-transparent hover:text-green-500'
-                                }`}
-                        >
-                            <CheckIcon size={12} />
-                        </button>
-                        <div>
-                            <p className={`text-foreground font-medium break-words whitespace-normal ${isComplete ? 'text-muted line-through' : ''}`}>
-                                {task.title}
-                            </p>
-                            {/* Calm effort display - just remaining hours */}
-                            <p className="text-xs text-muted mt-1">
-                                {isComplete
-                                    ? 'Complete'
-                                    : formatEffortDisplay(task.estimatedTotalMinutes - task.completedMinutes) + ' left'
-                                }
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
+import TaskItem from '@/components/TaskItem';
 
 interface GoalWithTasks extends Goal {
     tasks: Task[];
@@ -297,7 +251,7 @@ export default function HomePage() {
                                         tasks: editingGoal.tasks.map(t => ({
                                             id: t.id,
                                             title: t.title,
-                                            estimatedTotalMinutes: t.estimatedTotalMinutes,
+                                            // TIME ESTIMATION REMOVED - No estimatedTotalMinutes
                                         }))
                                     } : undefined}
                                 />
@@ -454,7 +408,7 @@ export default function HomePage() {
                                                                     key={task.id}
                                                                     task={task}
                                                                     goalId={goal.id}
-                                                                    onComplete={() => handleCompleteTask(task.id, isTaskEffectivelyComplete(task), task.estimatedTotalMinutes)}
+                                                                    onComplete={() => handleCompleteTask(task.id, isTaskEffectivelyComplete(task), task.estimatedTotalMinutes ?? 60)}
                                                                 />
                                                             ))}
                                                         </div>
@@ -477,7 +431,7 @@ export default function HomePage() {
                                                                     {allTasks.filter(t => isTaskEffectivelyComplete(t)).map(task => (
                                                                         <div key={task.id} className="flex items-center gap-3 p-2 rounded-lg opacity-50 hover:opacity-100 transition-opacity">
                                                                             <button
-                                                                                onClick={() => handleCompleteTask(task.id, true, task.estimatedTotalMinutes)}
+                                                                                onClick={() => handleCompleteTask(task.id, true, task.estimatedTotalMinutes ?? 60)}
                                                                                 className="w-4 h-4 rounded border-2 border-green-500 bg-green-500 text-white flex items-center justify-center"
                                                                                 title="Mark incomplete"
                                                                             >

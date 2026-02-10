@@ -3,13 +3,13 @@
 // Philosophy: User opens app → work is there. That's all.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { generateDailyPlan as generateAgentPlan } from '@/lib/agents/planner';
+import { generateDailyPlan as generateAgentPlan, getNextRecommendedSlice } from '@/lib/agents/planner';
 import {
     generateDailyPlan as generateLegacyPlan,
     completeSlice,
     skipSlice,
-    addMoreSlices,
 } from '@/lib/planning-engine';
+import { recordDailyCompletion } from '@/lib/tracking/completionRate';
 import type { Slice } from '@/lib/schema';
 import { getLocalDateString } from '@/lib/utils';
 import { getFeatures } from '@/lib/config/features';
@@ -99,6 +99,31 @@ function clearCache(): void {
 // Main Hook
 // ============================================
 
+interface DailyStats {
+    date: string;
+    planned: number;
+    completed: number;
+}
+
+const STATS_KEY = 'smallsteps-daily-stats';
+
+function getDailyStats(date: string): DailyStats {
+    if (typeof window === 'undefined') return { date, planned: 0, completed: 0 };
+    try {
+        const stored = localStorage.getItem(STATS_KEY);
+        if (stored) {
+            const stats = JSON.parse(stored);
+            if (stats.date === date) return stats;
+        }
+    } catch { }
+    return { date, planned: 0, completed: 0 };
+}
+
+function saveDailyStats(stats: DailyStats) {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+}
+
 export function useDailyPlan(): UseDailyPlanReturn {
     const [state, setState] = useState<DailyPlanState>({
         slices: [],
@@ -112,6 +137,15 @@ export function useDailyPlan(): UseDailyPlanReturn {
     // Silent plan loading - no spinners, no indicators
     const loadPlanSilently = useCallback(async () => {
         const today = getLocalDateString();
+        const lastDate = getLastPlanDate();
+
+        // Check for midnight rollover recording (Yesterday's progress)
+        if (lastDate && lastDate !== today) {
+            const stats = getDailyStats(lastDate);
+            if (stats.planned > 0) {
+                recordDailyCompletion(lastDate, stats.planned, stats.completed).catch(console.error);
+            }
+        }
 
         try {
             // Check cache first (instant)
@@ -131,6 +165,13 @@ export function useDailyPlan(): UseDailyPlanReturn {
             // Generate plan
             const slices = await generatePlan(today);
             cachePlan(today, slices);
+
+            // Initialize stats if new
+            const stats = getDailyStats(today);
+            if (stats.planned === 0) {
+                stats.planned = slices.length;
+                saveDailyStats(stats);
+            }
 
             setState({
                 slices,
@@ -169,7 +210,6 @@ export function useDailyPlan(): UseDailyPlanReturn {
             try {
                 const plan = await generateAgentPlan({
                     date,
-                    userCapacity: 240,
                 });
                 console.log('[DailyPlan] Agent generated', plan.slices.length, 'slices');
                 return plan.slices;
@@ -234,9 +274,14 @@ export function useDailyPlan(): UseDailyPlanReturn {
         // Persist
         await completeSlice(slice);
 
+        // Update stats
+        const stats = getDailyStats(state.date);
+        stats.completed += 1;
+        saveDailyStats(stats);
+
         // Update plan quietly after delay
         updatePlanQuietly();
-    }, [updatePlanQuietly]);
+    }, [state.date, updatePlanQuietly]);
 
     // Skip work item
     const skipWork = useCallback(async (slice: Slice) => {
@@ -285,32 +330,13 @@ export function useDailyPlan(): UseDailyPlanReturn {
     }, [loadPlanSilently]);
 
     // Get one more work unit (for "one more thing" feature)
-    // Prefers: light effort, different goal than recently worked
+    // Uses momentum logic to find next best step
     const getOneMoreThing = useCallback(async (): Promise<Slice | null> => {
         try {
             const today = getLocalDateString();
 
-            // Get recently worked goal IDs to exclude
-            const recentGoalIds = state.slices
-                .slice(0, 3)
-                .map(s => s.goal?.id)
-                .filter(Boolean) as string[];
-
-            // Try to add one more slice using legacy engine
-            // (It handles goal exclusion and prefers light work)
-            const currentPlan = {
-                date: today,
-                slices: state.slices,
-                totalMinutes: state.slices.reduce((sum, s) => sum + s.minutes, 0),
-                capacityMinutes: 240,
-                mode: 'light' as const,
-            };
-
-            const updatedPlan = await addMoreSlices(today, currentPlan, 30);
-
-            // Find the new slice (not in current list)
-            const currentIds = new Set(state.slices.map(s => s.workUnitId));
-            const newSlice = updatedPlan.slices.find(s => !currentIds.has(s.workUnitId));
+            // Use momentum-based selection
+            const newSlice = await getNextRecommendedSlice(state.slices);
 
             if (newSlice) {
                 // Add to state smoothly
@@ -322,12 +348,18 @@ export function useDailyPlan(): UseDailyPlanReturn {
                 // Update cache
                 cachePlan(today, [...state.slices, newSlice]);
 
+                // Update stats
+                const stats = getDailyStats(today);
+                stats.planned += 1;
+                saveDailyStats(stats);
+
                 return newSlice;
             }
 
             return null; // No more work available
-        } catch {
-            return null; // Silent fail
+        } catch (error) {
+            console.error('[DailyPlan] Failed to get more work:', error);
+            return null;
         }
     }, [state.slices]);
 
@@ -362,7 +394,6 @@ export function usePrefetchTomorrow(): void {
                 if (features.agentOrchestration) {
                     const plan = await generateAgentPlan({
                         date: tomorrowStr,
-                        userCapacity: 240,
                     });
                     cachePlan(tomorrowStr, plan.slices);
                     console.log('[DailyPlan] Prefetched tomorrow');

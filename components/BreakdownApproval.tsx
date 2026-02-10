@@ -41,7 +41,7 @@ export default function BreakdownApproval({
     const stats = useMemo(() => {
         const totalTasks = edited.tasks.length;
         const totalWorkUnits = edited.workUnits.length;
-        const totalMinutes = edited.tasks.reduce((sum, t) => sum + t.estimatedTotalMinutes, 0);
+        const totalMinutes = edited.tasks.reduce((sum, t) => sum + (t.estimatedTotalMinutes ?? 0), 0);
 
         // Estimate completion: assume 60 min/day average
         const daysNeeded = Math.ceil(totalMinutes / 60);
@@ -93,7 +93,7 @@ export default function BreakdownApproval({
         const actualWu = workUnitsForTask[wuIndex];
         if (!actualWu) return;
 
-        const oldMinutes = actualWu.estimatedTotalMinutes;
+        const oldMinutes = actualWu.estimatedTotalMinutes ?? 0;
         const diff = newMinutes - oldMinutes;
 
         // Update work unit
@@ -107,7 +107,7 @@ export default function BreakdownApproval({
         // Update parent task total
         const newTasks = edited.tasks.map((t, i) => {
             if (i === taskOrder) {
-                return { ...t, estimatedTotalMinutes: t.estimatedTotalMinutes + diff };
+                return { ...t, estimatedTotalMinutes: (t.estimatedTotalMinutes ?? 0) + diff };
             }
             return t;
         });
@@ -123,7 +123,7 @@ export default function BreakdownApproval({
         const actualWu = workUnitsForTask[wuIndex];
         if (!actualWu) return;
 
-        const minutes = actualWu.estimatedTotalMinutes;
+        const minutes = actualWu.estimatedTotalMinutes ?? 0;
 
         // Remove work unit
         const newWorkUnits = edited.workUnits.filter(wu => wu !== actualWu);
@@ -131,7 +131,7 @@ export default function BreakdownApproval({
         // Update parent task total
         const newTasks = edited.tasks.map((t, i) => {
             if (i === taskOrder) {
-                return { ...t, estimatedTotalMinutes: t.estimatedTotalMinutes - minutes };
+                return { ...t, estimatedTotalMinutes: (t.estimatedTotalMinutes ?? 0) - minutes };
             }
             return t;
         });
@@ -263,7 +263,7 @@ export default function BreakdownApproval({
                                 <div className="flex items-center gap-2 text-sm text-muted">
                                     <span>{taskWorkUnits.length} actions</span>
                                     <span className="text-slate-300">•</span>
-                                    <span>{formatTime(task.estimatedTotalMinutes)}</span>
+                                    <span>{formatTime(task.estimatedTotalMinutes ?? 0)}</span>
                                 </div>
                             </button>
 

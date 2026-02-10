@@ -57,7 +57,8 @@ export function generateSlice(
     goal: Goal,
     mode: DayMode
 ): Slice | null {
-    const remaining = workUnit.estimatedTotalMinutes - workUnit.completedMinutes;
+    // TIME ESTIMATION REMOVED - use default
+    const remaining = (workUnit.estimatedTotalMinutes ?? 60) - workUnit.completedMinutes;
 
     if (remaining <= 0) return null;
 
@@ -238,13 +239,13 @@ export async function generateDailyPlan(
         if (!slice) continue;
 
         // Check if adding this slice exceeds capacity
-        if (usedMinutes + slice.minutes > capacity && slices.length > 0) {
+        if (usedMinutes + (slice.minutes ?? 0) > capacity && slices.length > 0) {
             continue; // Skip but keep looking for smaller slices
         }
 
         slices.push(slice);
         usedTaskIds.add(task.id);
-        usedMinutes += slice.minutes;
+        usedMinutes += slice.minutes ?? 0;
     }
 
     // Guarantee: If work exists, plan must not be empty
@@ -253,7 +254,7 @@ export async function generateDailyPlan(
         const microSlice = generateSlice(workUnit, task, goal, 'light');
         if (microSlice) {
             slices.push(microSlice);
-            usedMinutes = microSlice.minutes;
+            usedMinutes = microSlice.minutes ?? 0;
         }
     }
 
@@ -275,7 +276,7 @@ export async function generateDailyPlan(
     await dailyAllocationsDB.create({
         date,
         workUnitIds: slices.map(s => s.workUnitId),
-        sliceMinutes: slices.map(s => s.minutes),
+        sliceMinutes: slices.map(s => s.minutes ?? 0),
         estimatedLoad: usedMinutes,
         mode,
     });
@@ -318,14 +319,14 @@ export async function regenerateDailyPlan(
  */
 export async function completeSlice(slice: Slice): Promise<void> {
     // 1. Update WorkUnit
-    await workUnitsDB.recordProgress(slice.workUnitId, slice.minutes);
+    await workUnitsDB.recordProgress(slice.workUnitId, slice.minutes ?? 0);
 
     // 2. Update Parent Task
     // We fetch fresh to get current accumulator, though slice.task has snapshot
     const task = await tasksDB.getById(slice.task.id);
     if (task) {
         await tasksDB.update(task.id, {
-            completedMinutes: (task.completedMinutes || 0) + slice.minutes
+            completedMinutes: (task.completedMinutes || 0) + (slice.minutes ?? 0)
         });
     }
 
@@ -370,7 +371,7 @@ export async function addMoreSlices(
         if (!slice) continue;
 
         newSlices.push(slice);
-        addedMinutes += slice.minutes;
+        addedMinutes += slice.minutes ?? 0;
     }
 
     // Update allocation
@@ -378,7 +379,7 @@ export async function addMoreSlices(
     if (allocation) {
         await dailyAllocationsDB.update(date, {
             workUnitIds: [...allocation.workUnitIds, ...newSlices.map(s => s.workUnitId)],
-            sliceMinutes: [...allocation.sliceMinutes, ...newSlices.map(s => s.minutes)],
+            sliceMinutes: [...allocation.sliceMinutes, ...newSlices.map(s => s.minutes ?? 0)],
             estimatedLoad: allocation.estimatedLoad + addedMinutes,
         });
     }

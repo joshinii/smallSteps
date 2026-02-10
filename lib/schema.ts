@@ -45,7 +45,7 @@ export interface Task {
     id: string;
     goalId: string;
     title: string;
-    estimatedTotalMinutes: number;
+    estimatedTotalMinutes?: number; // Optional - time estimation removed
     completedMinutes: number;
     order: number;
     // NEW: Intelligent Planning Fields
@@ -72,7 +72,7 @@ export interface WorkUnit {
     id: string;
     taskId: string;
     title: string;
-    estimatedTotalMinutes: number;
+    estimatedTotalMinutes?: number; // Optional - time estimation removed
     completedMinutes: number;
     kind: WorkUnitKind;
     capabilityId?: string; // Canonical identifier for deduplication
@@ -94,9 +94,9 @@ export interface Slice {
     workUnit: WorkUnit; // Populated for display
     task: Task;         // Populated for context
     goal: Goal;         // Populated for context
-    minutes: number;
-    label: SliceLabel;
-    reason?: 'quick-win' | 'due-soon' | 'momentum'; // AI Priority Reason
+    minutes?: number;   // Optional — momentum planner doesn't set this
+    label?: SliceLabel; // Optional — kept for legacy compat
+    reason?: 'quick-win' | 'due-soon' | 'momentum'; // Optional
 }
 
 /**
@@ -163,6 +163,13 @@ export interface DailyMoment {
     updatedAt: string;
 }
 
+
+export interface DailyCompletion {
+    date: string;
+    planned: number;
+    completed: number;
+    completionRate: number; // 0-1
+}
 export interface AISettings {
     id: 'ai-settings';
     provider: 'claude' | 'gemini' | 'openai' | 'lmstudio' | null;
@@ -184,8 +191,14 @@ export function getSliceLabel(minutes: number): SliceLabel {
 }
 
 /**
- * Check if a WorkUnit is effectively complete (85%+ done)
+ * Check if a WorkUnit is complete
+ * Without time estimates, completion is marked explicitly
  */
 export function isWorkUnitComplete(unit: WorkUnit): boolean {
+    // If no estimate, check if any work was logged (user marks complete)
+    if (!unit.estimatedTotalMinutes) {
+        return unit.completedMinutes > 0;
+    }
+    // Legacy: 85%+ of estimate = complete
     return unit.completedMinutes >= unit.estimatedTotalMinutes * 0.85;
 }

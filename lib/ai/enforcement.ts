@@ -2,16 +2,17 @@
 // Centralized enforcement logic for all AI providers
 // Includes quality validation for Gentle Architect philosophy
 
+// TIME ESTIMATION REMOVED - time fields are now optional
 export interface AITask {
     title: string;
-    estimatedTotalMinutes: number;
+    estimatedTotalMinutes?: number; // Optional - time estimation removed
     whyThisMatters?: string;
 }
 
 export interface AIWorkUnit {
     title: string;
     kind: string;
-    estimatedTotalMinutes: number;
+    estimatedTotalMinutes?: number; // Optional - time estimation removed
     capabilityId?: string;
     firstAction?: string;
     successSignal?: string;
@@ -140,10 +141,9 @@ function scavengeTasks(text: string): AITask[] {
                     try {
                         const parsed = JSON.parse(block);
                         if (parsed.title && typeof parsed.title === 'string') {
-                            // It looks like a task!
+                            // It looks like a task! (TIME ESTIMATION REMOVED)
                             validTasks.push({
                                 title: parsed.title,
-                                estimatedTotalMinutes: parsed.estimatedTotalMinutes || parsed.estimatedMinutes || 60,
                                 whyThisMatters: parsed.whyThisMatters
                             });
                         }
@@ -159,17 +159,12 @@ function scavengeTasks(text: string): AITask[] {
 }
 
 /**
- * Enforce minimum task minutes and quality (Stage 1)
- * - Ensures minimum effort per task (now 60 min for flexibility)
- * - Improves vague titles with suggestions
- * - Preserves whyThisMatters field
+ * Enforce task quality (TIME ESTIMATION REMOVED)
+ * - No longer enforces minimum effort per task
+ * - Keeps quality checks for titles and whyThisMatters
  */
 export function enforceTaskMinimums(tasks: AITask[]): AITask[] {
     return tasks.map((task) => {
-        let minutes = task.estimatedTotalMinutes || 120;
-        // Enforce meaningful chunks (minimum 60 min for smaller goals)
-        if (minutes < 60) minutes = 60;
-
         const title = task.title || 'Untitled Task';
 
         // Quality: Flag vague titles (log for monitoring, but keep AI's title)
@@ -180,7 +175,6 @@ export function enforceTaskMinimums(tasks: AITask[]): AITask[] {
         return {
             ...task,
             title,
-            estimatedTotalMinutes: minutes,
             whyThisMatters: task.whyThisMatters || undefined
         };
     });

@@ -11,6 +11,7 @@ import {
     TaskProgress,
     DailyMoment,
     AISettings,
+    DailyCompletion,
     isWorkUnitComplete,
 } from './schema';
 import { generateId, getISOTimestamp } from './utils';
@@ -99,6 +100,9 @@ export async function getDB(): Promise<IDBDatabase> {
 
             // AI settings store
             getStore('settings');
+
+            // Completion records store
+            const completionStore = getStore('completionRecords', 'date');
         };
     });
 }
@@ -205,7 +209,7 @@ export const goalsDB = {
 
     async checkAndCompleteGoal(goalId: string): Promise<{ completed: boolean; isDaily: boolean }> {
         const tasks = await tasksDB.getByGoalId(goalId);
-        const allComplete = tasks.every(t => t.completedMinutes >= t.estimatedTotalMinutes);
+        const allComplete = tasks.every(t => t.completedMinutes >= (t.estimatedTotalMinutes ?? 60));
 
         if (allComplete) {
             await this.update(goalId, { status: 'drained' });
@@ -533,5 +537,48 @@ export const aiSettingsDB = {
             ...settings,
         };
         return put('settings', updated);
+    },
+};
+
+// ============================================
+// Completion Records CRUD
+// ============================================
+
+export const completionRecordsDB = {
+    async getByDate(date: string): Promise<DailyCompletion | undefined> {
+        return getById<DailyCompletion>('completionRecords', date);
+    },
+
+    async getAll(): Promise<DailyCompletion[]> {
+        return getAll<DailyCompletion>('completionRecords');
+    },
+
+    async save(record: DailyCompletion): Promise<DailyCompletion> {
+        return put('completionRecords', record);
+    },
+};
+
+// ============================================
+// Planner Settings CRUD
+// ============================================
+
+export interface PlannerSettings {
+    id: 'planner-settings';
+    targetWorkUnits: number;
+    updatedAt: string;
+}
+
+export const plannerSettingsDB = {
+    async get(): Promise<PlannerSettings | undefined> {
+        return getById<PlannerSettings>('settings', 'planner-settings');
+    },
+
+    async save(count: number): Promise<PlannerSettings> {
+        const record: PlannerSettings = {
+            id: 'planner-settings',
+            targetWorkUnits: count,
+            updatedAt: getISOTimestamp(),
+        };
+        return put('settings', record);
     },
 };

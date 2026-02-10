@@ -21,12 +21,11 @@ interface GoalCreatorProps {
         id: string;
         title: string;
         targetDate?: string;
-        estimatedTargetDate?: string;
+        // TIME ESTIMATION REMOVED - estimatedTargetDate no longer used
         lifelong?: boolean;
         tasks: Array<{
             id: string;
             title: string;
-            estimatedTotalMinutes: number;
         }>;
     };
 }
@@ -43,7 +42,7 @@ export default function GoalCreator({
     const [goalTitle, setGoalTitle] = useState(existingGoal?.title || '');
     const [isLifelong, setIsLifelong] = useState(existingGoal?.lifelong || false);
     const [targetDate, setTargetDate] = useState(existingGoal?.targetDate || '');
-    const [estimatedTargetDate, setEstimatedTargetDate] = useState(existingGoal?.estimatedTargetDate || '');
+    // TIME ESTIMATION REMOVED - estimatedTargetDate no longer tracked
 
     const [clarificationQuestions, setClarificationQuestions] = useState<ClarificationQuestion[]>([]);
     const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -177,11 +176,7 @@ export default function GoalCreator({
                 order: t.order,
             })));
 
-            // Calculate estimated completion date
-            const totalMinutes = breakdown.tasks.reduce((sum, t) => sum + t.estimatedTotalMinutes, 0);
-            const suggested = await suggestTargetDate(totalMinutes);
-            setEstimatedTargetDate(suggested);
-
+            // TIME ESTIMATION REMOVED - No estimated completion date calculated
             setStep('preview');
         } catch (err) {
             console.error('[GoalCreator] Orchestrator generation failed:', err);
@@ -261,26 +256,15 @@ export default function GoalCreator({
                     }
 
                     setGeneratedTasks(validatedTasks);
-
-                    // Calculate estimated completion date
-                    const totalMinutes = validatedTasks.reduce((sum: number, t: any) => sum + t.estimatedTotalMinutes, 0);
-                    const suggested = await suggestTargetDate(totalMinutes);
-                    setEstimatedTargetDate(suggested);
+                    // TIME ESTIMATION REMOVED - No estimated completion date
                 } else {
                     console.warn('[GoalCreator] Validation failed, using unfiltered tasks');
                     setGeneratedTasks(goalPlan.tasks);
-
-                    const totalMinutes = goalPlan.tasks.reduce((sum: number, t: any) => sum + t.estimatedTotalMinutes, 0);
-                    const suggested = await suggestTargetDate(totalMinutes);
-                    setEstimatedTargetDate(suggested);
                 }
             } catch (validationError) {
                 console.warn('[GoalCreator] Validation error, using unfiltered tasks:', validationError);
                 setGeneratedTasks(goalPlan.tasks);
-
-                const totalMinutes = goalPlan.tasks.reduce((sum: number, t: any) => sum + t.estimatedTotalMinutes, 0);
-                const suggested = await suggestTargetDate(totalMinutes);
-                setEstimatedTargetDate(suggested);
+                // TIME ESTIMATION REMOVED - No estimated completion date
             }
 
             setStep('preview');
@@ -309,7 +293,7 @@ export default function GoalCreator({
                 await createGoalFromBreakdown(goalTitle, orchestratorBreakdown, {
                     goalData: {
                         targetDate: targetDate || undefined,
-                        estimatedTargetDate: estimatedTargetDate || undefined,
+                        // TIME ESTIMATION REMOVED - No estimatedTargetDate
                         lifelong: isLifelong,
                         domain,
                     },
@@ -329,7 +313,7 @@ export default function GoalCreator({
                 await goalsDB.update(goalId, {
                     title: goalTitle,
                     targetDate: targetDate || undefined,
-                    estimatedTargetDate: estimatedTargetDate || undefined,
+                    // TIME ESTIMATION REMOVED - No estimatedTargetDate
                     lifelong: isLifelong,
                     domain,
                 });
@@ -338,7 +322,7 @@ export default function GoalCreator({
                 goalId = await goalsDB.create({
                     title: goalTitle,
                     targetDate: targetDate || undefined,
-                    estimatedTargetDate: estimatedTargetDate || undefined,
+                    // TIME ESTIMATION REMOVED - No estimatedTargetDate
                     lifelong: isLifelong,
                     status: 'active',
                     domain,
@@ -352,7 +336,7 @@ export default function GoalCreator({
                     const task = await tasksDB.create({
                         goalId, // Use the ID returned from goalsDB.create()
                         title: taskData.title,
-                        estimatedTotalMinutes: taskData.estimatedTotalMinutes,
+                        // TIME ESTIMATION REMOVED - No estimatedTotalMinutes
                         completedMinutes: 0,
                         order: order++, // Required by schema
                     });
@@ -362,7 +346,7 @@ export default function GoalCreator({
                     await workUnitsDB.create({
                         taskId: task.id,
                         title: taskData.title, // Initially 1:1 mapping
-                        estimatedTotalMinutes: taskData.estimatedTotalMinutes,
+                        // TIME ESTIMATION REMOVED - No estimatedTotalMinutes
                         completedMinutes: 0,
                         kind: 'build', // Default kind
                         firstAction: 'Start working on this task',
@@ -491,17 +475,7 @@ export default function GoalCreator({
             <div>
                 <h3 className="text-lg font-medium text-foreground mb-2">Your Goal</h3>
                 <p className="text-muted">{goalTitle}</p>
-                {estimatedTargetDate && !isLifelong && (
-                    <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-sm border border-green-100">
-                        <span className="font-medium">Estimated completion:</span>
-                        <span>{new Date(estimatedTargetDate).toLocaleDateString(undefined, {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                        })}</span>
-                    </div>
-                )}
+                {/* TIME ESTIMATION REMOVED - No estimated completion date shown */}
             </div>
 
             <div>

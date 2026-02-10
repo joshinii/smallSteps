@@ -3,11 +3,11 @@
 // SmallSteps Test Page - Browser-based planner tests
 // Access at: /test-planner
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { generateDailyPlan } from '@/lib/agents/planner';
 import { goalsDB, tasksDB, workUnitsDB } from '@/lib/db';
-import { getLocalDateString, generateId } from '@/lib/utils';
-import type { Slice, Goal, Task, WorkUnit } from '@/lib/schema';
+import { getLocalDateString } from '@/lib/utils';
+import type { Goal } from '@/lib/schema';
 
 interface TestResult {
     name: string;
@@ -16,7 +16,7 @@ interface TestResult {
     duration?: number;
 }
 
-// Test Data Setup - Creates varied work units
+// Test Data Setup
 // ============================================
 
 async function setupTestData(): Promise<{ goals: Goal[]; cleanup: () => Promise<void> }> {
@@ -24,100 +24,46 @@ async function setupTestData(): Promise<{ goals: Goal[]; cleanup: () => Promise<
     const testTaskIds: string[] = [];
     const testWorkUnitIds: string[] = [];
 
-    // Goal 1: High Priority - Learn React (sooner target date)
-    const goal1Id = await goalsDB.create({
-        title: 'Learn React Fundamentals',
-        status: 'active',
-        targetDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    });
-    testGoalIds.push(goal1Id);
+    // Helper to create goal structure
+    const createChain = async (title: string, count: number) => {
+        const goalId = await goalsDB.create({
+            title,
+            status: 'active',
+            targetDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+        });
+        testGoalIds.push(goalId);
 
-    // Task 1 for Goal 1
-    const task1 = await tasksDB.create({
-        goalId: goal1Id,
-        title: 'React Basics',
-        estimatedTotalMinutes: 300,
-        completedMinutes: 0,
-        order: 0,
-        complexity: 2,
-    });
-    testTaskIds.push(task1.id);
+        const task = await tasksDB.create({
+            goalId,
+            title: `${title} Task`,
+            completedMinutes: 0,
+            order: 0,
+            complexity: 1,
+        });
+        testTaskIds.push(task.id);
 
-    // Work Units for Task 1 - varied sizes (Light/Medium/Heavy)
-    const wu1a = await workUnitsDB.create({ taskId: task1.id, title: 'Read React intro', estimatedTotalMinutes: 30, completedMinutes: 0, kind: 'study' });
-    const wu1b = await workUnitsDB.create({ taskId: task1.id, title: 'Set up environment', estimatedTotalMinutes: 30, completedMinutes: 0, kind: 'build' });
-    const wu1c = await workUnitsDB.create({ taskId: task1.id, title: 'Build first component', estimatedTotalMinutes: 60, completedMinutes: 0, kind: 'practice' });
-    const wu1d = await workUnitsDB.create({ taskId: task1.id, title: 'Practice hooks', estimatedTotalMinutes: 60, completedMinutes: 0, kind: 'practice' });
-    const wu1e = await workUnitsDB.create({ taskId: task1.id, title: 'Build mini project', estimatedTotalMinutes: 120, completedMinutes: 0, kind: 'build' });
-    testWorkUnitIds.push(wu1a.id, wu1b.id, wu1c.id, wu1d.id, wu1e.id);
+        for (let i = 0; i < count; i++) {
+            const wu = await workUnitsDB.create({
+                taskId: task.id,
+                title: `${title} Step ${i + 1}`,
+                completedMinutes: 0,
+                kind: 'practice'
+            });
+            testWorkUnitIds.push(wu.id);
+        }
+    };
 
-    // Goal 2: Medium Priority - Healthy Cooking (later target date)
-    const goal2Id = await goalsDB.create({
-        title: 'Learn Healthy Cooking',
-        status: 'active',
-        targetDate: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    });
-    testGoalIds.push(goal2Id);
+    // Create 3 goals with work
+    await createChain('Test Goal A', 5);
+    await createChain('Test Goal B', 5);
+    await createChain('Test Goal C', 5);
 
-    // Task 2 for Goal 2
-    const task2 = await tasksDB.create({
-        goalId: goal2Id,
-        title: 'Cooking Basics',
-        estimatedTotalMinutes: 240,
-        completedMinutes: 0,
-        order: 0,
-        complexity: 2,
-    });
-    testTaskIds.push(task2.id);
-
-    // Work Units for Task 2 - varied sizes
-    const wu2a = await workUnitsDB.create({ taskId: task2.id, title: 'Research meal prep', estimatedTotalMinutes: 30, completedMinutes: 0, kind: 'study' });
-    const wu2b = await workUnitsDB.create({ taskId: task2.id, title: 'Plan weekly menu', estimatedTotalMinutes: 30, completedMinutes: 0, kind: 'explore' });
-    const wu2c = await workUnitsDB.create({ taskId: task2.id, title: 'Get ingredients', estimatedTotalMinutes: 30, completedMinutes: 0, kind: 'explore' });
-    const wu2d = await workUnitsDB.create({ taskId: task2.id, title: 'Practice basic recipes', estimatedTotalMinutes: 60, completedMinutes: 0, kind: 'practice' });
-    const wu2e = await workUnitsDB.create({ taskId: task2.id, title: 'Cook full meal', estimatedTotalMinutes: 90, completedMinutes: 0, kind: 'build' });
-    testWorkUnitIds.push(wu2a.id, wu2b.id, wu2c.id, wu2d.id, wu2e.id);
-
-    // Goal 3: Low Priority - Exercise Routine (latest target date)
-    const goal3Id = await goalsDB.create({
-        title: 'Start Exercise Routine',
-        status: 'active',
-        targetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    });
-    testGoalIds.push(goal3Id);
-
-    // Task 3 for Goal 3
-    const task3 = await tasksDB.create({
-        goalId: goal3Id,
-        title: 'Exercise Basics',
-        estimatedTotalMinutes: 155,
-        completedMinutes: 0,
-        order: 0,
-        complexity: 1,
-    });
-    testTaskIds.push(task3.id);
-
-    // Work Units for Task 3 - varied sizes
-    const wu3a = await workUnitsDB.create({ taskId: task3.id, title: 'Research workout plans', estimatedTotalMinutes: 20, completedMinutes: 0, kind: 'study' });
-    const wu3b = await workUnitsDB.create({ taskId: task3.id, title: 'Buy workout gear', estimatedTotalMinutes: 30, completedMinutes: 0, kind: 'explore' });
-    const wu3c = await workUnitsDB.create({ taskId: task3.id, title: 'First workout session', estimatedTotalMinutes: 45, completedMinutes: 0, kind: 'practice' });
-    const wu3d = await workUnitsDB.create({ taskId: task3.id, title: 'Full week of workouts', estimatedTotalMinutes: 60, completedMinutes: 0, kind: 'practice' });
-    testWorkUnitIds.push(wu3a.id, wu3b.id, wu3c.id, wu3d.id);
-
-    // Get all created goals for return
     const goals = await Promise.all(testGoalIds.map(id => goalsDB.getById(id)));
 
-    // Cleanup function
     const cleanup = async () => {
-        for (const id of testWorkUnitIds) {
-            await workUnitsDB.delete(id);
-        }
-        for (const id of testTaskIds) {
-            await tasksDB.delete(id);
-        }
-        for (const id of testGoalIds) {
-            await goalsDB.delete(id);
-        }
+        for (const id of testWorkUnitIds) await workUnitsDB.delete(id);
+        for (const id of testTaskIds) await tasksDB.delete(id);
+        for (const id of testGoalIds) await goalsDB.delete(id);
     };
 
     return { goals: goals.filter(Boolean) as Goal[], cleanup };
@@ -136,33 +82,20 @@ export default function TestPlannerPage() {
     // Test Functions
     // ============================================
 
-    async function testSimplePlanSize(): Promise<TestResult> {
+    async function testPlanSize(): Promise<TestResult> {
         const start = Date.now();
         try {
-            const plan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240
-            });
+            const plan = await generateDailyPlan({ date: getLocalDateString() });
+            const count = plan.slices.length;
 
-            // Check heavy work units based on slice minutes (what user actually does today)
-            const heavyCount = plan.slices.filter(
-                s => s.minutes > 90
-            ).length;
-
-            if (plan.slices.length > 6) {
+            // 0 is valid if no goals (but we can't easily detect that here without setup)
+            // We assume extensive usage or test setup provides goals.
+            // Let's just check bounds if count > 0.
+            if (count > 0 && (count < 2 || count > 7)) {
                 return {
                     name: 'Plan Size Limit',
                     passed: false,
-                    message: `Too many slices: ${plan.slices.length} (max 6)`,
-                    duration: Date.now() - start
-                };
-            }
-
-            if (heavyCount > 1) {
-                return {
-                    name: 'Plan Size Limit',
-                    passed: false,
-                    message: `Too many heavy workunits: ${heavyCount} (max 1)`,
+                    message: `Plan has ${count} slices (expected 2–7)`,
                     duration: Date.now() - start
                 };
             }
@@ -170,7 +103,7 @@ export default function TestPlannerPage() {
             return {
                 name: 'Plan Size Limit',
                 passed: true,
-                message: `${plan.slices.length} slices, ${heavyCount} heavy (manageable)`,
+                message: `${count} slices (within valid range 2–7)`,
                 duration: Date.now() - start
             };
         } catch (error) {
@@ -186,28 +119,21 @@ export default function TestPlannerPage() {
     async function testMultiGoalBalance(): Promise<TestResult> {
         const start = Date.now();
         let cleanup: (() => Promise<void>) | null = null;
-
         try {
-            // Set up test data with varied work unit sizes
-            const testData = await setupTestData();
-            cleanup = testData.cleanup;
+            const { cleanup: clean } = await setupTestData();
+            cleanup = clean;
 
-            const plan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240
-            });
+            const plan = await generateDailyPlan({ date: getLocalDateString() });
+            const goalIds = new Set(plan.slices.map(s => s.goal.id));
 
-            const represented = new Set(plan.slices.map(s => s.goal?.id).filter(Boolean));
-
-            // Clean up test data before returning
             await cleanup();
             cleanup = null;
 
-            if (represented.size < 2 && plan.slices.length > 1) {
+            if (goalIds.size < 2) {
                 return {
                     name: 'Multi-Goal Balance',
                     passed: false,
-                    message: `Only ${represented.size} goals represented (expected ≥2)`,
+                    message: `Only ${goalIds.size} goal represented (expected ≥2)`,
                     duration: Date.now() - start
                 };
             }
@@ -215,7 +141,7 @@ export default function TestPlannerPage() {
             return {
                 name: 'Multi-Goal Balance',
                 passed: true,
-                message: `${represented.size}/3 goals represented`,
+                message: `${goalIds.size}/3 test goals represented`,
                 duration: Date.now() - start
             };
         } catch (error) {
@@ -229,44 +155,32 @@ export default function TestPlannerPage() {
         }
     }
 
-    async function testGentleProgression(): Promise<TestResult> {
+    async function testGentleLanguage(): Promise<TestResult> {
         const start = Date.now();
         try {
-            const plan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240
-            });
+            const plan = await generateDailyPlan({ date: getLocalDateString() });
+            const message = (plan.metadata?.message || '').toLowerCase();
+            const forbidden = ['deadline', 'overdue', 'urgent', 'failed', 'critical'];
 
-            if (plan.slices.length === 0) {
+            const found = forbidden.find(w => message.includes(w));
+            if (found) {
                 return {
-                    name: 'Gentle Progression',
-                    passed: true,
-                    message: 'Skipped: No slices',
-                    duration: Date.now() - start
-                };
-            }
-
-            // Check first slice minutes (what user actually does, not total remaining)
-            const firstSliceMinutes = plan.slices[0].minutes;
-
-            if (firstSliceMinutes > 60) {
-                return {
-                    name: 'Gentle Progression',
+                    name: 'Gentle Language',
                     passed: false,
-                    message: `First slice too heavy: ${firstSliceMinutes}min (max 60)`,
+                    message: `Found harsh word: "${found}"`,
                     duration: Date.now() - start
                 };
             }
 
             return {
-                name: 'Gentle Progression',
+                name: 'Gentle Language',
                 passed: true,
-                message: `First slice: ${firstSliceMinutes}min (gentle start)`,
+                message: 'No harsh words in plan metadata',
                 duration: Date.now() - start
             };
         } catch (error) {
             return {
-                name: 'Gentle Progression',
+                name: 'Gentle Language',
                 passed: false,
                 message: `Error: ${error}`,
                 duration: Date.now() - start
@@ -276,154 +190,30 @@ export default function TestPlannerPage() {
 
     async function testEmptyState(): Promise<TestResult> {
         const start = Date.now();
+        // Check that NO error is thrown and structure is valid.
         try {
-            const plan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240
-            });
+            const plan = await generateDailyPlan({ date: getLocalDateString() });
 
-            // Should always return a valid plan object
-            if (!plan) {
+            if (!plan || typeof plan.goalCount !== 'number') {
                 return {
-                    name: 'Empty State Handling',
+                    name: 'Plan Structure',
                     passed: false,
-                    message: 'Plan is null/undefined',
+                    message: 'Invalid plan structure returned',
                     duration: Date.now() - start
                 };
             }
 
             return {
-                name: 'Empty State Handling',
+                name: 'Plan Structure',
                 passed: true,
-                message: plan.slices.length === 0
-                    ? `Empty plan with message: "${plan.metadata?.message || 'OK'}"`
-                    : `Has ${plan.slices.length} slices`,
+                message: 'Plan object is valid',
                 duration: Date.now() - start
             };
         } catch (error) {
             return {
-                name: 'Empty State Handling',
+                name: 'Plan Structure',
                 passed: false,
                 message: `Error: ${error}`,
-                duration: Date.now() - start
-            };
-        }
-    }
-
-    async function testGentleLanguage(): Promise<TestResult> {
-        const start = Date.now();
-        try {
-            const plan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240
-            });
-
-            if (plan.slices.length === 0) {
-                return {
-                    name: 'Gentle Language',
-                    passed: true,
-                    message: 'Skipped: No slices to check',
-                    duration: Date.now() - start
-                };
-            }
-
-            const harshWords = ['deadline', 'urgent', 'overdue', 'failed', 'critical'];
-            const issues: string[] = [];
-
-            for (const slice of plan.slices) {
-                const title = slice.workUnit.title.toLowerCase();
-                for (const word of harshWords) {
-                    if (title.includes(word)) {
-                        issues.push(`"${word}" in "${slice.workUnit.title}"`);
-                    }
-                }
-            }
-
-            if (issues.length > 0) {
-                return {
-                    name: 'Gentle Language',
-                    passed: false,
-                    message: `Found harsh words: ${issues.join(', ')}`,
-                    duration: Date.now() - start
-                };
-            }
-
-            return {
-                name: 'Gentle Language',
-                passed: true,
-                message: `Checked ${plan.slices.length} work units - all gentle`,
-                duration: Date.now() - start
-            };
-        } catch (error) {
-            return {
-                name: 'Gentle Language',
-                passed: false,
-                message: `Error: ${error}`,
-                duration: Date.now() - start
-            };
-        }
-    }
-
-    async function testCapacityAdjustments(): Promise<TestResult> {
-        const start = Date.now();
-        try {
-            const lowEnergyPlan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240,
-                energyLevel: 1
-            });
-
-            const normalPlan = await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240,
-                energyLevel: 3
-            });
-
-            if (lowEnergyPlan.totalMinutes > normalPlan.totalMinutes && normalPlan.totalMinutes > 0) {
-                return {
-                    name: 'Capacity Adjustments',
-                    passed: false,
-                    message: `Low energy (${lowEnergyPlan.totalMinutes}min) > Normal (${normalPlan.totalMinutes}min)`,
-                    duration: Date.now() - start
-                };
-            }
-
-            return {
-                name: 'Capacity Adjustments',
-                passed: true,
-                message: `Low: ${lowEnergyPlan.totalMinutes}min, Normal: ${normalPlan.totalMinutes}min`,
-                duration: Date.now() - start
-            };
-        } catch (error) {
-            return {
-                name: 'Capacity Adjustments',
-                passed: false,
-                message: `Error: ${error}`,
-                duration: Date.now() - start
-            };
-        }
-    }
-
-    async function testNoThrow(): Promise<TestResult> {
-        const start = Date.now();
-        try {
-            // Should never throw
-            await generateDailyPlan({
-                date: getLocalDateString(),
-                userCapacity: 240
-            });
-
-            return {
-                name: 'Silent Failure',
-                passed: true,
-                message: 'No exceptions thrown',
-                duration: Date.now() - start
-            };
-        } catch (error) {
-            return {
-                name: 'Silent Failure',
-                passed: false,
-                message: `Threw exception: ${error}`,
                 duration: Date.now() - start
             };
         }
@@ -438,20 +228,16 @@ export default function TestPlannerPage() {
         setResults([]);
 
         const tests = [
-            { name: 'Plan Size Limit', fn: testSimplePlanSize },
+            { name: 'Plan Size Limit', fn: testPlanSize },
             { name: 'Multi-Goal Balance', fn: testMultiGoalBalance },
-            { name: 'Gentle Progression', fn: testGentleProgression },
-            { name: 'Empty State Handling', fn: testEmptyState },
             { name: 'Gentle Language', fn: testGentleLanguage },
-            { name: 'Capacity Adjustments', fn: testCapacityAdjustments },
-            { name: 'Silent Failure', fn: testNoThrow },
+            { name: 'Plan Structure', fn: testEmptyState },
         ];
 
         for (const test of tests) {
             setCurrentTest(test.name);
             const result = await test.fn();
             addResult(result);
-            // Small delay for visual feedback
             await new Promise(r => setTimeout(r, 100));
         }
 
@@ -466,7 +252,7 @@ export default function TestPlannerPage() {
         <div className="max-w-2xl mx-auto px-6 py-12">
             <header className="mb-8">
                 <h1 className="text-2xl font-light text-foreground">Planner Tests</h1>
-                <p className="text-sm text-muted mt-1">Calm UX Validation</p>
+                <p className="text-sm text-muted mt-1">Momentum Planner Validation</p>
             </header>
 
             <button

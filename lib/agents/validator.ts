@@ -152,13 +152,7 @@ function validateHardRules(breakdown: GeneratedBreakdown): string[] {
 
     // Individual WorkUnit validation
     for (const wu of breakdown.workUnits) {
-        // Time estimate bounds
-        if (wu.estimatedTotalMinutes < VALIDATION_CONFIG.workUnitMinutes.min) {
-            issues.push(`WorkUnit too short: "${truncate(wu.title)}" (min ${VALIDATION_CONFIG.workUnitMinutes.min} min)`);
-        }
-        if (wu.estimatedTotalMinutes > VALIDATION_CONFIG.workUnitMinutes.max) {
-            issues.push(`WorkUnit too long: "${truncate(wu.title)}" (max ${VALIDATION_CONFIG.workUnitMinutes.max} min - consider splitting)`);
-        }
+        // TIME ESTIMATION REMOVED - No time bounds validation
 
         // Required quality fields
         if (!wu.firstAction) {
@@ -227,12 +221,13 @@ async function validateWithLLM(
         return { quality: 'good' };
     }
 
+    // TIME ESTIMATION REMOVED - Show structure only
     const taskSummary = breakdown.tasks
-        .map(t => `- ${t.title} (${t.estimatedTotalMinutes} min)`)
+        .map(t => `- ${t.title} (Phase: ${t.phase || 'General'})`)
         .join('\n');
 
     const workUnitSummary = breakdown.workUnits
-        .map(wu => `- ${wu.title} (${wu.kind}, ${wu.estimatedTotalMinutes} min)`)
+        .map(wu => `- ${wu.title} (${wu.kind})`)
         .join('\n');
 
     const prompt = `Review this goal breakdown for quality. The user may be burnt-out or overwhelmed.
